@@ -1,0 +1,560 @@
+MAPAI
+AI-Native Discovery & Navigation Platform
+Product Requirements Document
+
+Version 1.4  |  June 2025
+Classification: Confidential
+
+
+1. Executive Summary
+Mapai is an AI-native mobile application designed to replace and fundamentally reimagine how people discover, evaluate, and navigate to places around them. Where Google Maps provides a generic directory of locations, Mapai builds a living, personalized model of each user — learning their preferences, loyalty patterns, and place-specific priorities — to surface only the recommendations that genuinely match what they care about.
+
+The core thesis is simple: people do not want a map that shows everything. They want a co-pilot that knows them well enough to surface exactly the right place at the right moment, explain why it fits, and get them there as cheaply and efficiently as possible.
+
+
+2. Problem Statement
+2.1  The Discovery Problem
+Google Maps was built for navigation, not discovery. Its Explore and Nearby features expose users to hundreds of undifferentiated results ranked primarily by paid promotion, raw rating count, and recency — not by personal fit. A user who values lightning-fast service and is price-sensitive receives the same search results as a user who is a quality-obsessed foodie willing to wait 45 minutes.
+
+2.2  The Signal Quality Problem
+Modern consumers make place decisions informed by Reddit threads, Instagram reels, TikTok reviews, and word-of-mouth — not a 4.2-star average from 3,000 strangers. No mainstream mapping product aggregates, weighs, or surfaces this rich social layer in a meaningful way.
+
+2.3  The Navigation Cost Problem
+When users decide to travel somewhere, they typically open a second app to check rideshare prices or transit routes. There is no unified surface that compares the total cost and time of every transport mode before committing.
+
+2.4  The Feedback Gap
+Apps collect no structured post-visit feedback, so the preference model never improves. The more a user travels, the less their app learns about them.
+
+North Star: Every interaction — a conversation, a visit, a quick survey — makes the next recommendation measurably better.
+
+3. Target Users & Personas
+3.1  Primary Personas
+
+
+3.2  Out of Scope (v1)
+Fleet management, B2B, or commercial routing
+International markets — out of scope until US expansion is complete
+Expansion beyond Boston, MA until v1 product-market fit is validated (target: 6 months post-launch)
+Real-estate or transit authority integrations
+
+4. Launch Market: Boston, MA
+Mapai will launch exclusively in Boston, Massachusetts. This single-city focus is a deliberate strategic decision: recommendation quality is a function of data density, and a tight geographic scope allows the team to build a world-class experience in one market before scaling. A mediocre product in 50 cities will not displace Google Maps. An exceptional product in one city will.
+
+4.1  Why Boston
+
+
+4.2  Boston Launch Scope
+Neighborhoods in v1 Place Index:
+Back Bay, Beacon Hill, Downtown / Financial District
+South End, South Boston (Seaport)
+North End, Waterfront
+Cambridge (Harvard Square, Central Square, Kendall Square)
+Somerville (Davis Square, Union Square)
+Fenway / Kenmore, Jamaica Plain
+
+Categories Prioritized for Boston v1:
+Restaurants & Cafes (all cuisines) — primary category
+Bars & Nightlife
+Coffee shops & Bakeries
+Gyms & Fitness
+Grocery & Specialty Food
+
+Boston-Specific Data Seeding Plan:
+Ingest r/boston, r/BostonFood, and r/CambridgeMA subreddits for place-level signals at launch
+Seed Google Places index with all venues in the above neighborhoods (est. 4,000–6,000 places)
+Manually QA top-200 venues per category to validate recommendation quality before beta
+Partner with 3–5 Boston-based food/lifestyle Instagram accounts for early social signal coverage
+
+4.3  Boston Beta & Expansion Criteria
+Mapai will remain Boston-only until the following criteria are met, at which point expansion to a second city (target: New York City or San Francisco) will be evaluated:
+
+500+ monthly active users in Boston with D30 retention ≥ 30%
+Average recommendation relevance rating ≥ 4.0 / 5.0 across ≥ 200 survey responses
+Arrival survey completion rate ≥ 55%
+At least one viral growth signal — organic App Store reviews, press coverage, or social sharing — indicating word-of-mouth traction
+
+Expansion Principle: We will not expand to a new city until Boston works. Premature geographic expansion is one of the most common ways consumer apps dilute quality and lose their early adopter base.
+
+5. Product Goals & Success Metrics
+
+
+
+6. Feature Requirements
+5.1  Conversational Discovery Interface
+The primary entry point to Mapai is a chat interface, not a search bar. Users express intent naturally — 'I want ramen, nothing too crowded, under $20' — and the AI interprets, asks follow-up questions if needed, and returns a curated shortlist rendered on the map.
+
+Functional Requirements:
+FR-1.1  Chat input persists as an overlay on the map at all times, collapsible to a bottom tab.
+FR-1.2  Natural-language understanding via LLM (see Architecture section) with intent classification: discovery, navigation, comparison, factual query.
+FR-1.3  Context carryover across sessions — 'somewhere like that place last Tuesday' must resolve correctly.
+FR-1.4  Proactive suggestions surface at contextually relevant moments (lunchtime, after work, weekend morning) based on time, location, and learned patterns.
+FR-1.5  Voice input supported on both iOS and Android.
+FR-1.6  Conversation history is viewable and searchable in a dedicated tab.
+
+Design Principle: The chat interface should never feel like a chatbot. It should feel like a knowledgeable local friend who already knows what you care about.
+
+5.2  Personalization & Memory Engine
+The memory engine is the core technical moat of Mapai. It maintains a structured, evolving model of each user's preferences derived from four signal sources: explicit conversation, implicit behavior, post-visit surveys, and external social data.
+
+Memory Dimensions Tracked:
+Cuisine preferences and aversions (explicit + implicit)
+Service speed sensitivity (derived from ratings and survey data)
+Price range comfort by category (explicit + spend data if payments integrated)
+Ambiance preferences (loud/quiet, outdoor/indoor, solo/group)
+Loyalty patterns — places visited 3+ times are tagged as 'regulars'
+Trusted social circles — places mentioned by followed accounts weighted higher
+Day-part preferences — breakfast spots vs. dinner spots treated as separate contexts
+
+Functional Requirements:
+FR-2.1  User memory is stored server-side per user profile; not device-local.
+FR-2.2  Memory dashboard accessible in Settings — users can view, edit, or delete any stored preference.
+FR-2.3  Memory confidence scores displayed to users ('We think you prefer fast service — based on 14 visits').
+FR-2.4  Memory profile is used as system-prompt context for every LLM inference call.
+FR-2.5  Preferences decay over time with a configurable half-life (default: 90 days) to prevent stale models.
+
+5.3  Personalized Map Layer
+The map itself reflects the user's preference model. Instead of showing all places equally, Mapai renders a curated layer where pin size, color, and label prominence encode recommendation confidence.
+
+Functional Requirements:
+FR-3.1  Map pins are color-coded by match score: deep blue (high match), gray (low match), gold (loyalty regular).
+FR-3.2  Pin cards surface on hover/tap with a 3-line summary: name, category, and top personalized reason ('Great for solo lunch under $15').
+FR-3.3  Discover mode shows a curated set of ≤ 15 pins — never an overwhelming directory.
+FR-3.4  Full-list mode available via swipe-up drawer, ranked by match score.
+FR-3.5  Map clusters intelligently at zoom levels; expands on zoom.
+FR-3.6  Real-time crowding data (where available via Google Places API or Foursquare) shown on pin cards.
+
+5.4  Place Detail & Comparison
+Place detail pages are rich, social-first, and opinionated. Every page leads with the personalized match rationale before surfacing raw data.
+
+Functional Requirements:
+FR-4.1  Place detail card includes: personalized match score, match reasoning, social highlights (Reddit/Instagram/TikTok quotes), hours, menu (where available), photos, and aggregate rating.
+FR-4.2  Social signal feed displays curated quotes from Reddit, Google Reviews, and Instagram with source attribution and recency.
+FR-4.3  Direct comparison mode: users can select 2–4 places and view a side-by-side comparison across: price range, wait time, match score, distance, transport cost.
+FR-4.4  Comparison table is shareable as an image or link.
+FR-4.5  'Why this?' button on every recommendation expands the full LLM reasoning chain.
+
+5.5  Navigation & Transport Comparison
+Once a user selects a destination, Mapai surfaces all transport options simultaneously with real-time pricing and time estimates, making the economically optimal choice obvious.
+
+Functional Requirements:
+FR-5.1  Navigation modes: Walking, Driving (own car), Uber, Lyft, and Public Transit.
+FR-5.2  Real-time Uber and Lyft price estimates fetched via their respective APIs.
+FR-5.3  Transit directions via Google Maps Directions API or Apple Maps SDK with step-by-step instructions.
+FR-5.4  Transport comparison screen shows: cost, ETA, carbon footprint estimate, and 'best value' badge.
+FR-5.5  One-tap deep link into Uber or Lyft app with destination pre-filled.
+FR-5.6  Walking routes rendered on-map with turn-by-turn voice guidance (using device TTS).
+FR-5.7  Driving mode uses on-device maps SDK for privacy-preserving routing.
+
+5.6  Arrival Surveys & Feedback Loop
+When a user arrives at a destination (detected via geofencing), Mapai sends a lightweight push notification with a micro-survey. Survey data is fed directly into the personalization engine.
+
+Functional Requirements:
+FR-6.1  Geofence triggered on arrival within 100m of the destination for ≥ 3 minutes.
+FR-6.2  Survey delivered as a push notification and in-app bottom sheet — 3–5 questions maximum.
+FR-6.3  Core survey dimensions: overall satisfaction, service speed, value for price, match to expectations, likelihood to return.
+FR-6.4  Dynamic follow-up questions generated by LLM based on place category and user history.
+FR-6.5  Survey responses stored in user memory model and weighted in future recommendations within 24 hours.
+FR-6.6  Users can opt out of surveys globally or per-place in Settings.
+FR-6.7  Aggregated survey data (anonymized) surfaced on place detail pages as 'Community Insights'.
+
+5.7  In-App Reservations & Booking
+A key friction point in the current discovery-to-visit journey is the gap between deciding to go somewhere and actually securing a spot. Mapai eliminates this friction by enabling users to request, check availability, and confirm reservations or bookings directly from the conversational interface — without ever leaving the app.
+
+Supported Booking Types (v1):
+Restaurant reservations (via OpenTable, Resy, and Yelp Reservations APIs)
+Activity and experience bookings (via Viator and direct venue integrations)
+Ride-hailing requests — Uber and Lyft dispatch triggered in-app without switching apps
+Waitlist join (via Yelp Nowait / NoWait API for walk-in queuing)
+
+Functional Requirements:
+FR-7.1  Conversational booking trigger: user can say 'Book a table for 2 at 7pm Saturday' and the AI orchestrates the full reservation flow inline in the chat interface.
+FR-7.2  Availability check is surfaced as a calendar/time-slot picker rendered as an interactive card within the chat thread — no modal or context switch required.
+FR-7.3  Confirmation and booking reference stored in the app under a 'My Plans' tab, with push notification reminders 24 hours and 1 hour before.
+FR-7.4  Rideshare dispatch: user can say 'Get me an Uber there by 7pm' — the app calculates departure time, shows estimated cost, and on confirmation dispatches the ride via Uber API without leaving Mapai.
+FR-7.5  Lyft dispatch supported as an alternative with one-tap switch if Lyft is cheaper (pulls from live estimate comparison already surfaced in FR-5.2).
+FR-7.6  If a venue is not connected to a supported booking API, the AI extracts the direct booking URL or phone number and presents it as a one-tap CTA ('Call to reserve' or 'Book on their website').
+FR-7.7  Booking cancellation and modification supported in-app where the upstream API permits.
+FR-7.8  All confirmed bookings automatically create a navigation intent — the app prompts transport comparison at the appropriate departure time.
+
+Rideshare Dispatch Flow:
+User confirms booking or taps 'Get me there'
+App calculates optimal departure time based on ETA + buffer preference (configurable: 5/10/15 min early)
+Transport comparison screen shown with live Uber and Lyft prices
+User selects rideshare option — Mapai calls Uber/Lyft Ride Request API in-app
+Driver matching status shown in a persistent bottom banner without leaving Mapai
+On ride completion, arrival geofence activates survey trigger (FR-6.1)
+
+Design Principle: The user should never need to leave Mapai to complete their intent. From 'I want ramen tonight' to confirmed table to dispatched ride — all in one conversation.
+
+5.8  Social Graph & Friend Features
+Discovery is inherently social. The most trusted recommendation is not an algorithm score — it is a friend saying 'you have to try this place.' Mapai's social layer transforms the app from a personal copilot into a shared discovery network, while maintaining strict privacy controls so users always choose what to share and with whom.
+
+Social Feature Overview:
+Friends graph — add contacts via phone number, username, or QR code
+Friend activity feed — see where friends have been and what they thought
+Loved places sharing — friends can see each other's curated place lists
+Live location sharing — opt-in, time-limited real-time location with friends
+Collaborative trip planning — invite friends to a shared map session
+
+Functional Requirements — Friends Graph:
+FR-8.1  Add friends via: username search, phone number (contacts sync with permission), QR code scan, or shareable invite link.
+FR-8.2  Friend requests require mutual acceptance — no unilateral following.
+FR-8.3  Friends list visible in a dedicated Social tab; maximum 500 friends per account (v1).
+FR-8.4  Block and report functionality with immediate effect on all social features.
+
+Functional Requirements — Loved Places & Activity:
+FR-8.5  Each user has a public 'Loved Places' list — places they have rated positively or manually pinned. Visible to friends by default; can be set to private per place or globally.
+FR-8.6  When viewing a place detail card, a 'Friends who love this' section shows avatars of friends who have visited or saved the place, with their one-line review or survey summary.
+FR-8.7  Friend activity feed (Social tab): a chronological stream of friend visits, new loved places, and reviews — each card shows place name, friend's photo, their match rating, and a one-line quote from their arrival survey.
+FR-8.8  Friends' loved places appear as a distinct pin layer on the map — purple pin with friend avatar badge — toggled via a 'Friends' filter button on the map toolbar.
+FR-8.9  Tapping a friend's pin opens their place note: why they loved it, when they visited, and their survey scores for speed, value, and quality.
+FR-8.10  Users can react to friend activity with emoji reactions (6 options) and leave a reply comment.
+
+Functional Requirements — Live Location Sharing:
+FR-8.11  Location sharing is always opt-in, explicitly activated per session, and never on by default.
+FR-8.12  Share options: share with all friends, share with a specific friend or group, or share via a timed link (expires in 1h, 4h, or 'until I arrive').
+FR-8.13  When location sharing is active, a persistent status bar is shown at the top of the app indicating who can see your location and a one-tap 'Stop Sharing' button.
+FR-8.14  Friends who are sharing location appear as moving avatars on the map in real time (5-second update interval).
+FR-8.15  'Meet here?' feature: when two friends are both sharing location, Mapai suggests a midpoint venue that matches both users' preference profiles.
+FR-8.16  Location data used for sharing is never stored server-side beyond a 60-second rolling buffer — no historical location tracking for social features.
+
+Functional Requirements — Collaborative Planning:
+FR-8.17  'Plan together' mode: user can invite up to 9 friends to a shared map session where all participants can suggest, upvote, and discuss places in a shared chat thread.
+FR-8.18  AI co-pilot in group planning mode considers all participants' preference profiles simultaneously to surface places that score well across the group.
+FR-8.19  Group decision: a built-in poll lets friends vote on a shortlist; the winning place automatically populates the navigation and booking flow.
+
+Privacy Principle: Social features are additive — every social setting defaults to off or friends-only. Location sharing requires active, explicit, per-session consent. User data is never shared with friends without permission.
+
+
+7. System Architecture
+6.1  High-Level Architecture Overview
+
+
+6.2  Core Services Breakdown
+
+
+6.3  AI & LLM Architecture
+6.3.1  Memory Architecture
+The user memory model has two layers: a structured facts layer (explicit, queryable) and a semantic embedding layer (fuzzy, used for similarity matching).
+
+Structured Facts Layer (PostgreSQL): stores discrete preference records — {user_id, dimension, value, confidence, created_at, last_updated, decay_weight}
+Embedding Layer (Pinecone): every user interaction (chat message, place visit, survey response) is embedded via text-embedding-3-large and stored with metadata for similarity retrieval
+On each LLM call, the top-k relevant memories are retrieved via cosine similarity and injected into the system prompt alongside hard-coded user facts
+
+6.3.2  Prompt Architecture
+Every AI Orchestration Service call constructs a prompt envelope with four components:
+System Persona: Defines Mapai's role and behavioral guardrails
+User Memory Context: Top-k retrieved memories + structured preference facts
+Situational Context: Current time, location (city-level), and recent session context
+User Message: The raw chat input or internal trigger (e.g., 'generate proactive suggestion')
+
+The LLM is instructed to return structured JSON in all non-conversational calls (e.g., place scoring, comparison generation, survey question generation) to enable deterministic downstream parsing.
+
+6.3.3  Social Signal Pipeline
+A nightly batch pipeline ingests the latest posts and reviews mentioning each place in the index. An LLM summarization step extracts: sentiment polarity, the top 3 highlighted attributes, and a representative quote. This enriched object is attached to the place record and surfaced in the detail card.
+
+6.4  Mobile Architecture
+Framework: React Native (Expo managed workflow)
+
+
+6.5  Data Flow: End-to-End Discovery Request
+
+User types 'Find me a quiet coffee shop under $8' in the chat interface
+Mobile sends message over WebSocket to AI Orchestration Service
+Orchestration Service queries Memory Engine for top-k relevant memories (coffee preferences, price sensitivity, ambiance history)
+Constructs prompt envelope and calls LLM inference API
+LLM returns structured JSON: {intent: 'discovery', filters: {category: 'cafe', max_price: 8, ambiance: 'quiet'}, reasoning: '...'}
+Orchestration Service passes filters to Places Service
+Places Service queries Google Places API + internal cache; applies personalization scoring via re-ranking model
+Top 15 scored results returned with enriched social signal summaries
+Results streamed back to mobile; map pins animate in ranked by match score
+User taps a pin; Places Service returns full detail object; Social Signal Service returns latest quote batch
+
+
+8. API Design
+7.1  API Conventions
+All APIs are RESTful over HTTPS with JSON payloads, except the Chat interface which uses WebSocket
+Base URL: https://api.mapai.app/v1/
+Authentication: Bearer JWT token in Authorization header
+Rate limiting: 100 req/min per user; 10 req/min for AI endpoints
+All responses include: {data, meta: {request_id, timestamp}, error?}
+Errors follow RFC 7807 Problem Details format
+
+7.2  Core API Endpoints
+
+
+7.3  WebSocket — Chat Interface
+The chat interface connects to wss://api.mapai.app/v1/chat/stream. Each session maintains a persistent connection with the following message types:
+
+
+7.4  Third-Party Integrations
+
+
+
+9. UI / UX Design Requirements
+8.1  Design Philosophy
+Mapai's visual design is built on three principles: Radical Reduction, Intelligent Defaults, and Trustworthy Personalization. Every screen should feel like the app already knows what the user needs before they ask.
+
+Anti-pattern: Do not let Mapai become Google Maps with a chatbot bolted on. Every design decision should ask: does this help the user find the right place faster, or does it add noise?
+
+8.2  Design System
+
+
+8.3  Screen-by-Screen UX Specification
+
+8.3.1  Home / Map Screen (Primary)
+The home screen is the map. The chat bar is always visible at the bottom as a persistent, rounded pill input. Pins are visible immediately on app open with the user's last-known location.
+
+Bottom sheet: collapsed to show chat input + 3 quick-action chips ('Coffee nearby', 'Lunch under $15', 'Open now')
+Map pins use custom icons: filled circles with category glyph; size encodes match score (larger = better match)
+Gold ring around 'loyalty' pins (visited 3+ times)
+Tap a pin: bottom sheet expands to mini-card with name, category, match score, and two CTAs: 'Details' and 'Navigate'
+Long-press on map: context menu 'What's good near here?'
+Top-right: profile avatar (taps to memory dashboard)
+Top-left: location picker (neighborhood or city level — never full address by default for privacy)
+
+8.3.2  Chat / Discovery Screen
+When the user taps the chat input, the screen transitions: map fades to 30% opacity, chat thread expands upward from the bottom. This keeps geographic context visible without distraction.
+
+Chat thread renders AI messages in a left-aligned bubble with a violet left border (signals AI provenance)
+User messages right-aligned, brand-blue fill
+Place results rendered as horizontal-scrolling cards within the chat thread — not as a list below the chat
+Each result card: photo thumbnail, name, category, match score badge, price range, and distance
+'Why this?' button on each card opens a bottom sheet with the LLM reasoning explanation
+Voice input button on keyboard toolbar — animated waveform while listening
+
+8.3.3  Place Detail Screen
+Accessed by tapping 'Details' on a pin card or a result card. Full-screen modal with a drag handle.
+
+Hero: photo carousel (top 5 photos from Google Places / Instagram)
+Above-the-fold: name, category chips, match score ring (visual confidence indicator), and match reasoning in 1–2 sentences
+Social Signals section: 3 curated quotes with source badge (Reddit, Google, Instagram) and recency
+Quick stats row: avg price, typical wait, hours status (open/closed/closing soon), crowding level
+CTA row: 'Navigate', 'Compare', 'Save'
+Below CTA: menu preview (if available), full reviews tab, map tab
+
+8.3.4  Transport Comparison Screen
+Triggered from any 'Navigate' CTA. Full-screen modal with a map preview at top and comparison cards below.
+
+Map preview shows origin-to-destination polyline, color-coded by selected mode
+Transport cards: one per mode (Walk, Drive, Uber, Lyft, Transit)
+Each card: mode icon, estimated cost (or 'Free' for walking/driving), ETA, and a 'Best Value' or 'Fastest' badge where applicable
+Uber and Lyft cards show live price range with a refresh button
+Selected mode highlights the corresponding polyline on the map
+Bottom CTA: 'Start Navigation' (in-app for walk/transit) or 'Open in Uber/Lyft' (deep link)
+
+8.3.5  Comparison Screen
+Accessed via 'Compare' button on place detail, or by selecting 2+ places on the map. Side-by-side comparison table.
+
+2-column layout (or horizontal scroll for 3–4 places)
+Rows: Match Score, Price Range, Typical Wait, Distance, Transport Cost (cheapest mode), Top Social Quote, Hours
+'Winner' badge on the cell with the best value per row (configurable by user priority: fastest, cheapest, highest match)
+Share button: exports comparison as a clean image card for sharing
+
+8.3.6  Arrival Survey Screen
+Delivered as a bottom sheet triggered by push notification on arrival. Designed to be completable in under 30 seconds.
+
+3–5 questions maximum — never a long form
+Question types: emoji scale (used for satisfaction, speed, value), binary yes/no, and single-choice chip select
+Progress dots at top — user can see how many questions remain
+'Skip' option always visible — never trap the user
+Completion: animated thumbs-up + 'Thanks! We'll remember this' micro-copy, then auto-dismiss
+
+8.3.8  In-Chat Booking Flow
+Booking is initiated and completed entirely within the chat interface. No full-screen modals — everything renders as interactive cards in the chat thread.
+
+Booking card appears in the chat after a user expresses intent ('book a table for 2 Saturday at 7') — shows venue name, available time slots as tappable chips, and party-size selector
+Selected slot confirms inline — booking reference appears as a 'confirmed' card with a green check, venue details, and add-to-calendar CTA
+Ride dispatch card: shows Uber vs. Lyft side-by-side with live price + ETA; 'Request' button on selected option; driver status shown in a collapsible status bar
+'My Plans' tab in bottom navigation: upcoming reservations and rides in a timeline view, each with one-tap navigation or cancellation
+Reminder push notifications at 24h and 1h before — tapping opens the plan detail with transport comparison pre-loaded for departure time
+
+8.3.9  Social Tab
+The Social tab is a dedicated screen accessible from the bottom navigation. It has three sub-tabs: Feed, Friends, and Plans.
+
+Feed sub-tab: chronological activity cards — each shows friend avatar, place photo, friend's one-line take, emoji reaction bar, and 'Add to my map' shortcut
+Friends sub-tab: friend list with search; each entry shows mutual loved places count and whether they are currently sharing location (green pulse indicator)
+Friends' pins on map: toggled via the 'Friends' chip on the map filter bar; purple pins with friend avatar overlays; tapping reveals friend's note about the place
+Add friends flow: full-screen modal with username search, QR scanner, and 'Share invite link' — clean single-purpose screen
+Privacy settings accessible via gear icon in Social tab header — controls what activity is visible to friends
+
+8.3.10  Live Location Sharing
+Location sharing is activated via the Friends sub-tab or from a 'Share my location' quick action in the chat interface.
+
+Activation sheet: choose who to share with (all friends / select friends) and duration (1h / 4h / Until I arrive)
+Active sharing state: persistent amber status bar at top of all screens with 'Sharing with N friends — Stop' — impossible to miss, impossible to accidentally leave on
+Friends sharing with you appear as animated avatar dots on the map with a 'last updated X sec ago' label
+'Meet in the middle' CTA appears when two friends are both sharing and within 5km — taps into a joint recommendation for a midpoint venue matching both profiles
+
+8.3.11  Group Planning Session
+Initiated from the Social tab or from the chat ('Plan somewhere with friends').
+
+Shared map canvas: all invited friends see the same map; each participant's suggestions appear as color-coded pins
+Group chat thread alongside the map — AI co-pilot responds to the group, factoring in all members' preference profiles
+Shortlist vote: host can lock a shortlist of 2–5 places and trigger a vote; results shown as a live bar chart; winner auto-selected
+Winning place populates the booking and navigation flow for all participants simultaneously
+
+Accessible from profile. Displays the user's learned preference model in a transparent, editable format.
+
+Preference cards organized by category (Food, Service, Price, Ambiance, Transport)
+Each card shows: dimension name, current value, confidence bar, and 'last updated' date
+Tap to edit or delete any preference
+'How did you learn this?' expandable section shows the visits/surveys that contributed
+'My Regulars' section: grid of loyalty-tagged places with visit count badges
+
+
+10. Privacy & Compliance
+9.1  Data Principles
+Minimum viable data collection — never collect data not needed for a user-facing feature
+User data is never sold or shared with third parties for advertising purposes
+All location data is processed on-device at the neighborhood level for recommendations; precise GPS used only during active navigation and survey arrival detection
+Memory profiles are user-owned — full export and deletion available in Settings
+
+9.2  Regulatory Requirements
+CCPA (California Consumer Privacy Act) — data access, deletion, and opt-out flows required at launch
+GDPR-ready architecture for future EU expansion — legal basis documentation, DPA template, and data residency controls
+COPPA compliance — age gate at onboarding; no accounts for users under 13
+App Store / Play Store privacy nutrition label accurately reflects all data types collected
+
+9.3  Security Requirements
+All data encrypted in transit (TLS 1.3) and at rest (AES-256)
+JWT tokens with 1-hour expiry; refresh token rotation
+Memory profile data stored in isolated, per-user encrypted partitions
+Annual third-party penetration test; bug bounty program at launch
+SOC 2 Type II certification target: 18 months post-launch
+
+11. Phased Delivery Roadmap
+
+
+12. Technical Risks & Mitigations
+
+
+
+13. AI Agent Opportunities
+Mapai is itself an AI-native product, which creates a unique opportunity: the same agent infrastructure powering the user-facing features can be turned inward to accelerate and automate significant portions of the product's own development and operations. This section categorizes where AI agents add the most leverage, distinguishing between tasks agents can own autonomously, tasks that benefit from agent assistance with human oversight, and tasks that require human leadership.
+
+Principle: AI agents should own repetitive, high-volume, well-defined tasks. Humans should own anything with real-world consequences (financial transactions, privacy enforcement, quality bar-setting) until trust is established through demonstrated reliability.
+
+13.1  Tier 1 — Agents Can Own Autonomously
+These are tasks that are well-defined, reversible, and do not carry meaningful risk if the agent makes an error. They are also high-volume and time-consuming for humans — making them the highest-leverage targets for automation from day one.
+
+
+13.2  Tier 2 — Agents Accelerate With Human Oversight
+These tasks benefit substantially from AI automation but require a human to own the quality bar, review edge cases, or approve outputs before they affect users.
+
+
+13.3  Tier 3 — Humans Must Lead
+These are areas where the stakes of an agent error are too high, the problem is too ambiguous, or the trust calibration work has not yet been done. These are not permanent exclusions — as agent reliability is demonstrated, some may graduate to Tier 2.
+
+
+13.4  Agent Infrastructure Recommendations
+To realize the Tier 1 and Tier 2 opportunities above, the engineering team should invest in the following agent infrastructure in parallel with product development:
+
+Agent Orchestration Framework: Use an established framework (LangGraph, CrewAI, or Anthropic's tool-use API directly) rather than building bespoke agent loops. Standardizes observability, retry logic, and human escalation paths across all agent tasks.
+Eval Harness: Build a lightweight golden-dataset eval framework before the first agent goes to production. Every agent task in Tier 1 and Tier 2 must have a passing eval suite before it runs autonomously.
+Agent Observability Dashboard: All agent runs — inputs, outputs, confidence scores, escalations — logged and viewable in an internal ops dashboard. Required for the human oversight model in Tier 2 to function.
+Human-in-the-Loop Queue: A simple review queue (can be a Slack channel + approval bot in v1) for agent outputs that require human sign-off before they affect the production system.
+Prompt Version Control: All LLM prompts used by agents stored in version control alongside the codebase, with changelogs and rollback capability. Prompt changes follow the same review process as code changes.
+
+Cost Note: Tier 1 agent tasks running nightly on a Boston-sized index (4,000–6,000 places) at Claude Sonnet pricing are estimated at $15–40/day. This is a significant operational cost saving vs. manual data operations, but should be modeled explicitly in the infrastructure budget.
+
+
+14. Engineering Kickoff: Sprint 0 & First Three Sprints
+This section provides a concrete execution plan for the engineering team upon receipt of this PRD. It covers what to do in the first two days, how to structure Sprint 0 (the setup sprint), and the goals and deliverables for Sprints 1 through 3. The end state of Sprint 3 is a closed beta with real Boston users.
+
+Critical Principle: Do not write product code before Sprint 0 is complete. Teams that skip straight to building in Sprint 1 spend Sprint 2 undoing architectural decisions made in isolation under time pressure.
+
+14.1  Day 1–2: PRD Ingestion & Technical Kickoff
+When engineers receive this PRD, the first 48 hours should be spent as a team reading, questioning, and aligning — not building. The output of the kickoff is a shared understanding of what is being built, who owns what, and what the biggest unknowns are.
+
+Day 1 — Full Team PRD Readthrough:
+Every engineer reads the full PRD independently before the kickoff meeting
+Each person comes with: one assumption they want to challenge, one technical risk not in Section 12, and one open question not in Section 13
+Kickoff meeting: walk through the PRD section by section, 90 minutes maximum — no decisions made yet, only questions surfaced and logged
+
+Day 2 — Technical Architecture Session:
+Finalize stack decisions: confirm React Native, cloud provider (AWS recommended), LLM provider (Anthropic Claude via abstracted inference layer), and vector storage (pgvector for v1, Pinecone upgrade path documented)
+Assign service ownership: each engineer or pair claims a service domain from Section 7.2 (Core Services Breakdown)
+Identify the three highest-risk technical assumptions and assign a 2-day spike to each — these become Sprint 0 work items
+API access audit: determine which third-party APIs require approval or sandbox access and start those processes immediately (Uber, Lyft, OpenTable, Resy can each take 1–3 weeks)
+Define the Definition of Done for each sprint — agree on what 'working' means before writing code
+
+14.2  Sprint 0 — Foundation & De-risking (Weeks 1–2)
+Sprint 0 is not a delivery sprint. It has no user-facing output. Its sole purpose is to eliminate the technical unknowns that would otherwise surface mid-Sprint 1 or Sprint 2 and derail progress. Every hour invested here saves three hours later.
+
+Sprint 0 Goals:
+Cloud infrastructure live: AWS project configured, CI/CD pipeline running, three environments (dev / staging / prod) provisioned, database schemas drafted
+LLM prototype validated: a basic chat interface connected to the LLM API with a hardcoded list of 20 Boston restaurants returns coherent, personalized recommendations — proves the core loop works before infrastructure is built around it
+API access confirmed: Google Places, Uber Estimate, and Lyft Estimate sandbox credentials obtained and tested with real calls
+React Native scaffolding: Expo project initialized, navigation structure stubbed, map rendering confirmed on both iOS simulator and Android emulator
+Auth service live: Supabase Auth configured, OAuth with Apple and Google working end-to-end in the dev environment
+
+Sprint 0 Work Items by Owner:
+
+
+Sprint 0 Exit Criteria — all of the following must be true before Sprint 1 begins:
+CI/CD pipeline runs on every PR and deploys to staging automatically
+LLM prototype demoed to full team on a real device — team agrees it feels qualitatively better than Google Maps for discovery
+Google Places API returning real Boston venue data in the dev environment
+Auth flow working end-to-end: create account, log out, log back in, session persists
+All third-party API applications submitted (Uber, Lyft, OpenTable); sandbox access confirmed for at least Google Places
+
+14.3  Sprint 1 — The Walking Skeleton (Weeks 3–4)
+The goal of Sprint 1 is a single end-to-end user journey working on a real device: open the app, see a map of Boston, type a natural-language request, receive real personalized place recommendations rendered as pins on the map. Nothing else. This is the walking skeleton — it proves the core value proposition works technically before any polish or secondary features are added.
+
+
+Sprint 1 Work Items:
+
+
+Sprint 1 Explicitly Out of Scope:
+User authentication (stubbed with a hardcoded test user)
+Persistent memory (preferences hardcoded in test user profile for demo purposes)
+Navigation or transport comparison
+Social features, booking, surveys
+Android (iOS only for Sprint 1)
+
+Sprint 1 Review: Demo the walking skeleton to at least one person outside the engineering team — ideally a potential user. Their reaction to the core discovery loop is your earliest signal on whether the product hypothesis is correct.
+
+14.4  Sprint 2 — Auth, Memory & Real Personalization (Weeks 5–6)
+Sprint 2 transforms the walking skeleton into a real product: users create accounts, their preferences persist across sessions, and the recommendations actually change based on what the system has learned about them. By the end of Sprint 2, the app should feel meaningfully different on day 5 of use than it did on day 1 — that is the moment it becomes Mapai rather than a ChatGPT wrapper on Google Maps.
+
+
+Sprint 2 Work Items:
+
+
+14.5  Sprint 3 — Navigation, Transport & Closed Beta (Weeks 7–8)
+Sprint 3 completes the minimum viable product and prepares the app for its first real users. By the end of Sprint 3, the full discovery-to-navigation loop is working: find a place, compare how to get there, navigate, arrive, get a survey. This is the closed beta cutover sprint — the last sprint before real Boston users touch the product.
+
+
+Sprint 3 Work Items:
+
+
+Post-Sprint 3: What Comes Next
+Once the closed beta is live, the team shifts into a listen-and-iterate mode. The next 4 weeks should be driven entirely by beta user feedback, not the PRD roadmap. Specifically, watch for three signals:
+Are users returning on their own without prompting? (Retention signal — the most important metric at this stage)
+Are the recommendations feeling personal, or generic? (Personalization quality signal — drives memory engine iteration)
+Where are users dropping off? (Funnel analysis — identifies the weakest link in the discovery-to-navigation loop)
+
+Only after 4 weeks of closed beta data should the team commit to the Sprint 4+ roadmap. The PRD's Phase 2 features (full memory engine, social signal pipeline, Android) are the natural next step — but let real user behavior, not the document, set the priority order.
+
+15. Open Questions for Engineering Review
+
+Navigation depth: Should Phase 1 build in-app turn-by-turn for walking, or deep-link to Apple/Google Maps for all navigation? Trade-off: user experience continuity vs. development time.
+LLM provider strategy: Should we build to a single provider (Anthropic Claude) or abstract the inference layer from day one to allow model switching? Recommendation: abstract from day one.
+Memory storage architecture: Pinecone vs. pgvector (PostgreSQL extension) for vector storage. pgvector reduces infrastructure complexity but may not scale to 10M+ users without sharding.
+Survey incentivization: Should completed surveys unlock features (e.g., extended history) or is a gamification layer premature and potentially manipulative?
+Rideshare pricing model: Uber and Lyft price estimate APIs have usage limits and require approval. What is the fallback if API access is denied or delayed pre-launch?
+Data monetization: The aggregated, anonymized survey data has significant commercial value to place operators. At what scale does this become a revenue stream, and what are the ethical boundaries?
+
+16. Appendix
+A. Glossary
+
+B. Referenced Standards & APIs
+Google Places API — https://developers.google.com/maps/documentation/places/web-service
+Uber Price Estimate API — https://developer.uber.com/docs/riders/references/api/v1.2/estimates-price-get
+Lyft Ride Estimates API — https://developer.lyft.com/docs/api-cost-estimates
+Reddit API — https://www.reddit.com/dev/api
+RFC 7807 Problem Details — https://datatracker.ietf.org/doc/html/rfc7807
+Anthropic Claude API — https://docs.anthropic.com/en/api
+
+Document prepared for engineering review. Questions: product@mapai.app
