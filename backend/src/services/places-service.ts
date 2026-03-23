@@ -53,7 +53,7 @@ export class PlacesService {
                         'places.regularOpeningHours,places.websiteUri,places.nationalPhoneNumber',
                 },
                 body: JSON.stringify({
-                    textQuery: `${input.query} Boston MA`,
+                    textQuery: input.query,
                     locationBias: {
                         circle: {
                             center: input.location,
@@ -65,7 +65,8 @@ export class PlacesService {
             });
 
             if (!response.ok) {
-                console.error('Google Places text search error:', response.status);
+                const errorBody = await response.text();
+                console.error(`[Places] Google text search error — status: ${response.status}, body: ${errorBody}`);
                 return [];
             }
 
@@ -118,7 +119,8 @@ export class PlacesService {
             });
 
             if (!response.ok) {
-                console.error('Google Places nearby error:', response.status);
+                const errorBody = await response.text();
+                console.error(`[Places] Google nearby search error — status: ${response.status}, body: ${errorBody}`);
                 return [];
             }
 

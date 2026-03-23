@@ -53,8 +53,12 @@ export async function chatRoutes(app: FastifyInstance) {
             const userId = request.user!.id;
 
             try {
+                const t0 = Date.now();
+
                 // 1. Load user memory/preferences
                 const userMemory = await memory.getUserContext(userId);
+                const tMemory = Date.now();
+                console.log(`[Chat] Memory loaded in ${tMemory - t0}ms for user ${userId}`);
 
                 // 2. Send to AI orchestrator
                 const aiResponse = await ai.chat({
@@ -67,6 +71,8 @@ export async function chatRoutes(app: FastifyInstance) {
                         : undefined,
                     context,
                 });
+                const tAi = Date.now();
+                console.log(`[Chat] AI responded in ${tAi - tMemory}ms — searchQuery: ${aiResponse.searchQuery ? `"${aiResponse.searchQuery}"` : '(none)'}`);
 
                 // 3. If AI detected a discovery intent, fetch real places
                 let placeResults: any[] = [];
@@ -78,6 +84,8 @@ export async function chatRoutes(app: FastifyInstance) {
                         userId,
                         userMemory,
                     });
+                    const tPlaces = Date.now();
+                    console.log(`[Chat] Places search returned ${placeResults.length} results in ${tPlaces - tAi}ms`);
                 }
 
                 // 4. Extract preference insights from conversation and save
@@ -85,7 +93,16 @@ export async function chatRoutes(app: FastifyInstance) {
                     await memory.learnFromInsights(userId, aiResponse.preferenceInsights);
                 }
 
+                const totalMs = Date.now() - t0;
+                const responseType = placeResults.length > 0
+                    ? 'recommendation'
+                    : aiResponse.text
+                        ? 'conversational'
+                        : 'error';
+                console.log(`[Chat] Total request time: ${totalMs}ms — type: ${responseType}`);
+
                 return envelope({
+                    type: responseType,
                     reply: aiResponse.text,
                     places: placeResults,
                     intent: aiResponse.discoveryIntent || null,

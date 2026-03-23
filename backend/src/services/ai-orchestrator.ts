@@ -73,6 +73,11 @@ export class AiOrchestrator {
         // Build system prompt (PRD §6.3.2)
         const systemPrompt = this.buildSystemPrompt(input.userMemory, input.location, input.context);
 
+        if (config.isDev) {
+            console.log('[AI] System prompt length:', systemPrompt.length, 'chars');
+            console.log('[AI] System prompt:\n', systemPrompt);
+        }
+
         // Add user message
         const newMessage: SessionMessage = {
             role: 'user',
@@ -83,6 +88,7 @@ export class AiOrchestrator {
 
         // Keep last 20 messages to stay within context window
         const recentMessages = messages.slice(-20);
+        console.log(`[AI] Sending ${recentMessages.length} messages to Claude (model: ${config.anthropic.model})`);
 
         try {
             const response = await this.client.messages.create({
@@ -126,8 +132,14 @@ export class AiOrchestrator {
                 preferenceInsights: parsed.preferenceInsights,
                 sessionId,
             };
-        } catch (err) {
-            console.error('Claude API error:', err);
+        } catch (err: any) {
+            const errorType = err?.constructor?.name || 'UnknownError';
+            const statusCode = err?.status || err?.statusCode || 'N/A';
+            const errorMessage = err?.message || String(err);
+            console.error(`[AI] Claude API error — type: ${errorType}, status: ${statusCode}, message: ${errorMessage}`);
+            if (err?.error) {
+                console.error('[AI] Error body:', JSON.stringify(err.error, null, 2));
+            }
             return {
                 text: "I'm having trouble right now. Could you try again?",
                 preferenceInsights: [],
@@ -311,8 +323,9 @@ Your response:
                 searchQuery = parsed.search_query || parsed.searchQuery;
                 discoveryIntent = parsed.intent;
                 preferenceInsights = parsed.preference_insights || parsed.preferenceInsights || [];
-            } catch {
-                // JSON parse failed — just use the text as-is
+            } catch (parseErr) {
+                console.warn('[AI] mapai_intent JSON parse failed. Raw block text:', intentMatch[1]);
+                console.warn('[AI] Parse error:', parseErr);
             }
         }
 

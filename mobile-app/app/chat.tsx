@@ -17,6 +17,7 @@ import {
   ActivityIndicator,
   SafeAreaView,
 } from 'react-native';
+import { useMapStore } from '@/store/mapStore';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:3001';
 
@@ -26,12 +27,14 @@ type PlaceResult = {
   id?: string;
   name: string;
   category?: string;
-  neighborhood?: string;
   priceLevel?: number;
   matchScore?: number;
   matchReasons?: string[];
   address?: string;
+  location?: { latitude: number; longitude: number };
 };
+
+type ResponseType = 'recommendation' | 'conversational' | 'error';
 
 type Message = {
   id: string;
@@ -45,7 +48,7 @@ type Message = {
 function PlaceCard({ place, index }: { place: PlaceResult; index: number }) {
   const price = place.priceLevel ? '$'.repeat(place.priceLevel) : null;
   const reason = place.matchReasons?.[0];
-  const chips = [place.category, place.neighborhood, price].filter(Boolean);
+  const chips = [place.category, price].filter(Boolean);
 
   return (
     <View style={styles.card}>
@@ -90,6 +93,7 @@ export default function ChatScreen() {
   const [loading, setLoading] = useState(false);
   const sessionId = useRef(`session-${Date.now()}`).current;
   const scrollRef = useRef<ScrollView>(null);
+  const { setDiscoveryPlaces } = useMapStore();
 
   const scrollToBottom = () =>
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
@@ -108,7 +112,11 @@ export default function ChatScreen() {
       const res = await fetch(`${BACKEND_URL}/v1/chat/message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text, session_id: sessionId }),
+        body: JSON.stringify({
+          message: text,
+          session_id: sessionId,
+          location: { lat: 42.3601, lng: -71.0589 },
+        }),
       });
 
       if (!res.ok) {
@@ -116,14 +124,37 @@ export default function ChatScreen() {
       }
 
       const json = await res.json();
-      // Backend wraps in { data: { reply, places, ... } }
+      // Backend wraps in { data: { type, reply, places, session_id } }
       const data = json.data ?? json;
+      const responseType: ResponseType = data.type || 'recommendation';
+
+      // Only include places for recommendation responses
+      const places =
+        responseType === 'recommendation' && Array.isArray(data.places)
+          ? data.places.slice(0, 5)
+          : [];
+
+      // Sync places to the map store so ExploreView markers update
+      if (places.length > 0) {
+        setDiscoveryPlaces(
+          places
+            .filter((p: PlaceResult) => p.location?.latitude && p.location?.longitude)
+            .map((p: PlaceResult) => ({
+              ...p,
+              location: {
+                latitude: p.location!.latitude,
+                longitude: p.location!.longitude,
+              },
+              matchScore: p.matchScore ?? 0,
+            })),
+        );
+      }
 
       const aiMsg: Message = {
         id: `a-${Date.now()}`,
         role: 'assistant',
         content: data.reply || data.text || '(no response)',
-        places: Array.isArray(data.places) ? data.places.slice(0, 5) : [],
+        places,
       };
       setMessages(prev => [...prev, aiMsg]);
     } catch (err: any) {
@@ -142,7 +173,7 @@ export default function ChatScreen() {
       setLoading(false);
       scrollToBottom();
     }
-  }, [input, loading, sessionId]);
+  }, [input, loading, sessionId, setDiscoveryPlaces]);
 
   return (
     <SafeAreaView style={styles.root}>
