@@ -5,6 +5,13 @@
 
 import 'dotenv/config';
 
+console.log('--- Config Environment Check ---');
+console.log('NODE_ENV:', process.env.NODE_ENV);
+console.log('ANTHROPIC_API_KEY:', process.env.ANTHROPIC_API_KEY ? 'Found' : 'MISSING');
+console.log('GOOGLE_PLACES_API_KEY:', process.env.GOOGLE_PLACES_API_KEY ? 'Found' : 'MISSING');
+console.log('SUPABASE_URL:', process.env.SUPABASE_URL ? 'Found' : 'MISSING');
+console.log('--------------------------------');
+
 export const config = {
     // Server
     port: parseInt(process.env.PORT || '3001', 10),
@@ -43,6 +50,9 @@ export const config = {
 // Validate required config on startup
 export function validateConfig(): string[] {
     const warnings: string[] = [];
+    if (!process.env.NODE_ENV) {
+        warnings.push('NODE_ENV not set — defaulting to development. Set NODE_ENV=production for all deployments.');
+    }
     if (!config.anthropic.apiKey) warnings.push('ANTHROPIC_API_KEY not set');
     if (!config.google.placesApiKey) warnings.push('GOOGLE_PLACES_API_KEY not set');
     if (!config.supabase.url) warnings.push('SUPABASE_URL not set — auth disabled');
