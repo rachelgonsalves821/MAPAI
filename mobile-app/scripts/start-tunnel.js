@@ -88,21 +88,25 @@ function createProxy(tunnelHostname) {
     const proxyReq = http.request(opts, (proxyRes) => {
       const ct = proxyRes.headers['content-type'] || '';
 
-      if (ct.includes('application/json') || ct.includes('text/javascript') && req.url === '/') {
-        // Collect full body so we can rewrite it
+      // Rewrite any text-based response — catches application/json, multipart/mixed,
+      // application/expo+json, text/javascript, text/plain, etc.
+      // Skip obvious binary types only (images, fonts, video, audio).
+      const isBinary = /image\/|font\/|video\/|audio\/|application\/octet-stream/.test(ct);
+
+      if (!isBinary) {
         const chunks = [];
         proxyRes.on('data', c => chunks.push(c));
         proxyRes.on('end', () => {
           let body = Buffer.concat(chunks).toString('utf8');
-          // Rewrite any occurrence of the internal host:port → tunnel HTTPS URL
-          const portPattern = new RegExp(`http://[^"'\\s]*:${METRO_PORT}`, 'g');
-          body = body.replace(portPattern, `https://${tunnelHostname}`);
-          const headers = { ...proxyRes.headers, 'content-length': Buffer.byteLength(body) };
+          // Replace http://hostname:METRO_PORT with https://hostname (Cloudflare HTTPS)
+          const portPattern = new RegExp(`http://[^/"' \\\\]*:${METRO_PORT}`, 'g');
+          const rewritten = body.replace(portPattern, `https://${tunnelHostname}`);
+          const headers = { ...proxyRes.headers, 'content-length': Buffer.byteLength(rewritten) };
+          delete headers['transfer-encoding']; // remove chunked encoding since we have full body
           res.writeHead(proxyRes.statusCode, headers);
-          res.end(body);
+          res.end(rewritten);
         });
       } else {
-        // Stream everything else unchanged
         res.writeHead(proxyRes.statusCode, proxyRes.headers);
         proxyRes.pipe(res);
       }
