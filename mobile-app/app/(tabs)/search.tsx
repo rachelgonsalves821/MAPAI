@@ -14,11 +14,13 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors, Typography, Spacing, BorderRadius, Shadows } from '@/constants/theme';
+import { Colors, Shadows } from '@/constants/theme';
 import ChatBubble from '@/components/ChatBubble';
 import { useSendMessage } from '@/services/api/hooks';
-import { ChatMessage, Place } from '@/types';
+import { ChatMessage } from '@/types';
 import { useAuth } from '@/context/AuthContext';
+import { useUIStore } from '@/store/uiStore';
+import { useMapStore } from '@/store/mapStore';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -26,14 +28,21 @@ export default function SearchScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ query?: string }>();
   const scrollRef = useRef<ScrollView>(null);
-  
+  const sessionId = useRef(Date.now().toString()).current;
+
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
   const { user } = useAuth();
+  const { openChat, closeChat } = useUIStore();
+  const { setDiscoveryPlaces } = useMapStore();
 
   const sendMutation = useSendMessage();
 
-  // Handle initial query from navigation params
+  useEffect(() => {
+    openChat();
+    return () => closeChat();
+  }, []);
+
   useEffect(() => {
     if (params.query) {
       handleSend(params.query);
@@ -57,7 +66,7 @@ export default function SearchScreen() {
     try {
       const response = await sendMutation.mutateAsync({
         message: messageText,
-        session_id: 'session-123',
+        session_id: sessionId,
         user_id: user?.id || 'anonymous',
       });
 
@@ -70,6 +79,11 @@ export default function SearchScreen() {
       };
 
       setMessages(prev => [...prev, aiMsg]);
+
+      // Sync results to Discover tab
+      if (response.places && response.places.length > 0) {
+        setDiscoveryPlaces(response.places);
+      }
     } catch (error) {
       console.error('Search error:', error);
     } finally {
@@ -80,24 +94,23 @@ export default function SearchScreen() {
   const isTyping = sendMutation.isPending;
 
   return (
-    <KeyboardAvoidingView 
-      style={styles.container} 
+    <KeyboardAvoidingView
+      style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
     >
-      {/* Premium Search Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="chevron-back" size={24} color={Colors.textPrimary} />
-        </TouchableOpacity>
         <View style={styles.headerTitleContainer}>
+          <Ionicons name="sparkles" size={18} color={Colors.brandViolet} />
           <Text style={styles.headerTitle}>Discovery</Text>
           <View style={styles.statusDot} />
         </View>
-        <View style={{ width: 40 }} /> {/* Spacer */}
+        <TouchableOpacity style={styles.historyButton}>
+          <Ionicons name="time-outline" size={24} color={Colors.textSecondary} />
+        </TouchableOpacity>
       </View>
 
-      <ScrollView 
+      <ScrollView
         ref={scrollRef}
         style={styles.chatList}
         contentContainerStyle={styles.chatContent}
@@ -115,77 +128,62 @@ export default function SearchScreen() {
         {messages.map((msg) => (
           <View key={msg.id}>
             <ChatBubble role={msg.role} content={msg.content} />
-            
+
             {msg.placeResults && (
-              <ScrollView 
-                horizontal 
+              <ScrollView
+                horizontal
                 showsHorizontalScrollIndicator={false}
                 style={styles.placesContainer}
                 contentContainerStyle={styles.placesContent}
               >
                 {msg.placeResults.map((place) => (
-                    <TouchableOpacity 
-                      key={place.id} 
-                      style={styles.placeCard}
-                      onPress={() => router.push(`/place/${place.id}`)}
-                    >
-                      <Image 
-                        source={{ uri: place.photos?.[0] || 'https://via.placeholder.com/300x200' }} 
-                        style={styles.placeImage} 
-                      />
-                      
-                      {/* Sentiment Badge */}
-                      {place.socialSignals && place.socialSignals.length > 0 && (
-                        <View style={styles.sentimentBadge}>
-                          <Ionicons 
-                            name={place.socialSignals[0].sentiment === 'positive' ? 'trending-up' : 'analytics'} 
-                            size={12} 
-                            color="#FFF" 
-                          />
-                        </View>
+                  <TouchableOpacity
+                    key={place.id}
+                    style={styles.placeCard}
+                    onPress={() => router.push(`/place/${place.id}` as any)}
+                  >
+                    <Image
+                      source={{ uri: place.photos?.[0] || 'https://via.placeholder.com/300x200' }}
+                      style={styles.placeImage}
+                    />
+
+                    <View style={styles.placeInfo}>
+                      <Text style={styles.placeName} numberOfLines={1}>{place.name}</Text>
+                      <View style={styles.scoreRow}>
+                        <Text style={styles.matchScore}>{place.matchScore}% Match</Text>
+                        {place.priceLevel && (
+                          <Text style={styles.priceLevel}>{'• ' + '$'.repeat(place.priceLevel)}</Text>
+                        )}
+                      </View>
+
+                      {place.matchReasons && place.matchReasons.length > 0 && (
+                        <Text style={styles.reasonText} numberOfLines={2}>
+                          {place.matchReasons[0]}
+                        </Text>
                       )}
 
-                      <View style={styles.placeInfo}>
-                        <Text style={styles.placeName} numberOfLines={1}>{place.name}</Text>
-                        <View style={styles.scoreRow}>
-                          <Text style={styles.matchScore}>{place.matchScore}% Match</Text>
-                          {place.priceLevel && (
-                             <Text style={styles.priceLevel}>{'• ' + '$'.repeat(place.priceLevel)}</Text>
-                          )}
-                        </View>
-                        
-                        {/* Social Signal Snippet */}
-                        {place.socialSignals && place.socialSignals.length > 0 && (
-                          <View style={styles.socialSnippet}>
-                            <Text style={styles.socialText} numberOfLines={2}>
-                              "{place.socialSignals[0].quote}"
-                            </Text>
-                          </View>
-                        )}
-
-                        {/* Actions */}
-                        <View style={styles.cardActions}>
-                          <TouchableOpacity 
-                            style={styles.actionButton}
-                            onPress={() => router.push(`/place/${place.id}`)}
-                          >
-                            <Text style={styles.actionButtonText}>Details</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity 
-                            style={[styles.actionButton, styles.mapButton]}
-                            onPress={() => {
-                              router.replace({
-                                pathname: '/(tabs)',
-                                params: { selectedPlaceId: place.id }
-                              });
-                            }}
-                          >
-                            <Ionicons name="map-outline" size={14} color={Colors.brandViolet} />
-                            <Text style={[styles.actionButtonText, { color: Colors.brandViolet }]}>Map</Text>
-                          </TouchableOpacity>
-                        </View>
+                      <View style={styles.cardActions}>
+                        <TouchableOpacity
+                          style={styles.actionButton}
+                          onPress={() => router.push(`/place/${place.id}` as any)}
+                        >
+                          <Text style={styles.actionButtonText}>Details</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.actionButton, styles.mapButton]}
+                          onPress={() => {
+                            router.replace({
+                              pathname: '/(tabs)',
+                              params: { selectedPlaceId: place.id }
+                            } as any);
+                          }}
+                        >
+                          <Ionicons name="map-outline" size={14} color={Colors.brandBlue} />
+                          <Text style={[styles.actionButtonText, { color: Colors.brandBlue }]}>Map</Text>
+                        </TouchableOpacity>
                       </View>
-                    </TouchableOpacity>
+                    </View>
+                  </TouchableOpacity>
                 ))}
               </ScrollView>
             )}
@@ -200,7 +198,6 @@ export default function SearchScreen() {
         )}
       </ScrollView>
 
-      {/* Modern Input Bar */}
       <View style={styles.inputContainer}>
         <View style={styles.inputPill}>
           <TextInput
@@ -211,15 +208,15 @@ export default function SearchScreen() {
             onChangeText={setInputText}
             onSubmitEditing={() => handleSend()}
           />
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.sendButton, !inputText.trim() && styles.sendButtonDisabled]}
             disabled={!inputText.trim()}
             onPress={() => handleSend()}
           >
-            <Ionicons 
-              name="arrow-up" 
-              size={20} 
-              color={inputText.trim() ? '#FFF' : Colors.textTertiary} 
+            <Ionicons
+              name="arrow-up"
+              size={20}
+              color={inputText.trim() ? '#FFF' : Colors.textTertiary}
             />
           </TouchableOpacity>
         </View>
@@ -231,7 +228,7 @@ export default function SearchScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
+    backgroundColor: '#FFFFFF',
   },
   header: {
     flexDirection: 'row',
@@ -240,9 +237,9 @@ const styles = StyleSheet.create({
     paddingTop: Platform.OS === 'ios' ? 60 : 40,
     paddingHorizontal: 16,
     paddingBottom: 16,
-    backgroundColor: Colors.background,
+    backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.05)',
+    borderBottomColor: Colors.surfaceBorder,
   },
   headerTitleContainer: {
     flexDirection: 'row',
@@ -259,13 +256,14 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: Colors.accentNeon,
+    backgroundColor: Colors.success,
   },
-  backButton: {
+  historyButton: {
     padding: 8,
   },
   chatList: {
     flex: 1,
+    backgroundColor: '#F9FAFB',
   },
   chatContent: {
     paddingVertical: 20,
@@ -281,7 +279,7 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: Colors.surface,
+    backgroundColor: '#F0F6FF',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 20,
@@ -303,30 +301,17 @@ const styles = StyleSheet.create({
   },
   placeCard: {
     width: 200,
-    backgroundColor: Colors.surface,
+    backgroundColor: '#FFFFFF',
     borderRadius: 16,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
-    ...Shadows.md,
+    borderColor: Colors.surfaceBorder,
+    ...Shadows.sm,
   },
   placeImage: {
     width: '100%',
     height: 100,
     backgroundColor: Colors.surfaceElevated,
-  },
-  sentimentBadge: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: 'rgba(139, 92, 246, 0.8)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
   },
   placeInfo: {
     padding: 12,
@@ -343,7 +328,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   matchScore: {
-    color: Colors.brandViolet,
+    color: Colors.brandBlue,
     fontSize: 12,
     fontWeight: '800',
   },
@@ -352,17 +337,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
-  socialSnippet: {
-    marginTop: 8,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.05)',
-  },
-  socialText: {
-    color: Colors.textSecondary,
+  reasonText: {
+    color: Colors.brandViolet,
     fontSize: 11,
-    lineHeight: 16,
     fontStyle: 'italic',
+    lineHeight: 16,
+    marginTop: 6,
   },
   cardActions: {
     flexDirection: 'row',
@@ -380,9 +360,9 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   mapButton: {
-    backgroundColor: 'rgba(139, 92, 246, 0.1)',
+    backgroundColor: 'rgba(29, 62, 145, 0.06)',
     borderWidth: 1,
-    borderColor: 'rgba(139, 92, 246, 0.2)',
+    borderColor: 'rgba(29, 62, 145, 0.15)',
   },
   actionButtonText: {
     color: Colors.textSecondary,
@@ -405,18 +385,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     paddingBottom: Platform.OS === 'ios' ? 34 : 16,
-    backgroundColor: Colors.background,
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: 1,
+    borderTopColor: Colors.surfaceBorder,
   },
   inputPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.surface,
+    backgroundColor: '#F9FAFB',
     paddingLeft: 20,
     paddingRight: 6,
     paddingVertical: 6,
     borderRadius: 30,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: Colors.surfaceBorder,
   },
   input: {
     flex: 1,
@@ -428,11 +410,11 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: Colors.brandViolet,
+    backgroundColor: Colors.brandBlue,
     alignItems: 'center',
     justifyContent: 'center',
   },
   sendButtonDisabled: {
-    backgroundColor: 'transparent',
+    backgroundColor: Colors.surfaceElevated,
   },
 });

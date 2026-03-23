@@ -508,7 +508,7 @@ const styles = StyleSheet.create({
     },
     reasoningText: {
         flex: 1,
-        color: Colors.brandVioletLight,
+        color: Colors.textSecondary,
         fontSize: Typography.sizes.sm,
         fontStyle: 'italic',
         lineHeight: 20,

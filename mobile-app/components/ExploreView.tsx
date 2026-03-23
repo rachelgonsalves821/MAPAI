@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, Dimensions } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
-import { Colors, Typography, Spacing, BorderRadius, MapConfig } from '@/constants/theme';
+import { Colors, Typography, Spacing, BorderRadius, MapConfig, Shadows } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { LatLng, Place } from '../types';
+import { useUIStore } from '@/store/uiStore';
 
 interface ExploreViewProps {
   places: Place[];
@@ -12,16 +13,18 @@ interface ExploreViewProps {
   routePoints?: LatLng[];
 }
 
-export default function ExploreView({ 
-  places, 
-  onPlaceSelect, 
-  selectedPlace, 
-  routePoints 
+export default function ExploreView({
+  places,
+  onPlaceSelect,
+  selectedPlace,
+  routePoints
 }: ExploreViewProps) {
   const [region, setRegion] = useState(MapConfig.initialRegion);
+  const { mapOpacity } = useUIStore();
 
   return (
     <View style={styles.container}>
+      <View style={{ flex: 1, opacity: mapOpacity }}>
       <MapView
         provider={PROVIDER_GOOGLE}
         style={styles.map}
@@ -42,7 +45,7 @@ export default function ExploreView({
             ]}>
               <View style={[
                 styles.markerCircle,
-                { backgroundColor: place.matchScore > 85 ? Colors.brandViolet : Colors.brandBlue }
+                { backgroundColor: place.matchScore >= 70 ? Colors.matchHigh : place.matchScore >= 40 ? Colors.matchMedium : Colors.matchLow }
               ]}>
                 <Text style={styles.markerText}>{place.matchScore}%</Text>
               </View>
@@ -60,6 +63,7 @@ export default function ExploreView({
           />
         )}
       </MapView>
+      </View>
 
       {/* Floating UI Elements */}
       <View style={styles.floatingContainer}>
@@ -95,12 +99,8 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.3)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 5,
+    borderColor: '#FFFFFF',
+    ...Shadows.sm,
   },
   markerText: {
     color: '#fff',
@@ -110,7 +110,7 @@ const styles = StyleSheet.create({
   markerTail: {
     width: 2,
     height: 4,
-    backgroundColor: 'rgba(255,255,255,0.3)',
+    backgroundColor: Colors.surfaceBorder,
   },
   floatingContainer: {
     position: 'absolute',
@@ -122,15 +122,11 @@ const styles = StyleSheet.create({
     width: 50,
     height: 50,
     borderRadius: 25,
-    backgroundColor: 'rgba(22, 22, 29, 0.9)',
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
+    borderColor: Colors.surfaceBorder,
+    ...Shadows.md,
   },
 });

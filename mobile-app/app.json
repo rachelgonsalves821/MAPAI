@@ -6,9 +6,9 @@
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "mapai",
-    "userInterfaceStyle": "dark",
+    "userInterfaceStyle": "light",
     "splash": {
-      "backgroundColor": "#0F0F14"
+      "backgroundColor": "#FFFFFF"
     },
     "ios": {
       "supportsTablet": false,
@@ -25,7 +25,7 @@
     "android": {
       "package": "app.mapai.mobile",
       "adaptiveIcon": {
-        "backgroundColor": "#0F0F14"
+        "backgroundColor": "#1D3E91"
       },
       "config": {
         "googleMaps": {
@@ -45,8 +45,7 @@
     },
     "plugins": [
       "expo-router",
-      "expo-font",
-      "expo-web-browser"
+      "expo-font"
     ],
     "experiments": {
       "typedRoutes": false

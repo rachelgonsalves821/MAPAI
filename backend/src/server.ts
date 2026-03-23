@@ -3,6 +3,7 @@
  * Fastify server with CORS, WebSocket, rate limiting, and route registration.
  */
 
+import 'dotenv/config';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
@@ -11,7 +12,9 @@ import { config, validateConfig } from './config.js';
 import { chatRoutes } from './routes/chat.js';
 import { placesRoutes } from './routes/places.js';
 import { memoryRoutes } from './routes/memory.js';
+import { navigationRoutes } from './routes/navigation.js';
 import { healthRoutes } from './routes/health.js';
+import { userRoutes } from './routes/user.js';
 
 async function main() {
     // Validate config
@@ -44,14 +47,26 @@ async function main() {
         timeWindow: '1 minute',
     });
 
+    // Root / landing
+    app.get('/', async () => {
+        return {
+            name: 'Mapai API',
+            status: 'running',
+            documentation: '/v1/health',
+            message: 'Welcome to the Mapai API. Use /v1 prefix for all endpoints.'
+        };
+    });
+
     // Routes (all prefixed with /v1)
-    await app.register(healthRoutes);
+    await app.register(healthRoutes, { prefix: '/v1' });
     await app.register(chatRoutes, { prefix: '/v1/chat' });
     await app.register(placesRoutes, { prefix: '/v1/places' });
     await app.register(memoryRoutes, { prefix: '/v1/user' });
+    await app.register(userRoutes, { prefix: '/v1/user' });
+    await app.register(navigationRoutes, { prefix: '/v1/navigation' });
 
     // Global error handler
-    app.setErrorHandler((error, _request, reply) => {
+    app.setErrorHandler((error: any, _request, reply) => {
         const statusCode = error.statusCode || 500;
         app.log.error(error);
         reply.status(statusCode).send({

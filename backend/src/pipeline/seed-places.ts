@@ -3,10 +3,12 @@
  * Crawls Google Places API to build the Boston place index.
  * Target: 4,000–6,000 venues across key neighborhoods.
  *
+ * Writes to Supabase when configured, falls back to place-index.json.
  * Usage: npx tsx src/pipeline/seed-places.ts
  */
 
 import 'dotenv/config';
+import { getSupabase } from '../db/supabase-client.js';
 
 const GOOGLE_API_KEY = process.env.GOOGLE_PLACES_API_KEY || '';
 const PLACES_BASE = 'https://places.googleapis.com/v1/places';
@@ -39,11 +41,22 @@ const PLACE_TYPES = [
     'meal_takeaway',
 ];
 
-interface SeedResult {
+interface MappedPlace {
+    google_place_id: string;
+    name: string;
+    address: string;
+    latitude: number;
+    longitude: number;
     neighborhood: string;
-    type: string;
-    count: number;
-    places: any[];
+    category: string;
+    rating: number;
+    rating_count: number;
+    price_level: number;
+    photos: string[];
+    website: string;
+    phone_number: string;
+    open_now: boolean | null;
+    seed_category: string;
 }
 
 async function searchNearby(
@@ -79,8 +92,69 @@ async function searchNearby(
         return [];
     }
 
-    const data = await response.json();
+    const data = (await response.json()) as any;
     return data.places || [];
+}
+
+function mapPlace(raw: any, neighborhood: string, seedCategory: string): MappedPlace {
+    const priceLevelMap: Record<string, number> = {
+        PRICE_LEVEL_FREE: 0,
+        PRICE_LEVEL_INEXPENSIVE: 1,
+        PRICE_LEVEL_MODERATE: 2,
+        PRICE_LEVEL_EXPENSIVE: 3,
+        PRICE_LEVEL_VERY_EXPENSIVE: 4,
+    };
+
+    return {
+        google_place_id: raw.id,
+        name: raw.displayName?.text || '',
+        address: raw.formattedAddress || '',
+        latitude: raw.location?.latitude || 0,
+        longitude: raw.location?.longitude || 0,
+        neighborhood,
+        category: raw.primaryType || 'restaurant',
+        rating: raw.rating || 0,
+        rating_count: raw.userRatingCount || 0,
+        price_level: priceLevelMap[raw.priceLevel] ?? 2,
+        photos: (raw.photos || []).slice(0, 3).map((p: any) => p.name),
+        website: raw.websiteUri || '',
+        phone_number: raw.nationalPhoneNumber || '',
+        open_now: raw.regularOpeningHours?.openNow ?? null,
+        seed_category: seedCategory,
+    };
+}
+
+async function writeToSupabase(places: MappedPlace[]): Promise<boolean> {
+    const supabase = getSupabase();
+    if (!supabase) return false;
+
+    console.log(`\n📤 Writing ${places.length} places to Supabase...`);
+
+    // Batch upsert in chunks of 100
+    const BATCH_SIZE = 100;
+    let written = 0;
+
+    for (let i = 0; i < places.length; i += BATCH_SIZE) {
+        const batch = places.slice(i, i + BATCH_SIZE);
+        const { error } = await (supabase.from('places') as any)
+            .upsert(batch as any[], { onConflict: 'google_place_id' });
+
+        if (error) {
+            console.error(`  ✗ Batch ${Math.floor(i / BATCH_SIZE) + 1} error:`, error.message);
+        } else {
+            written += batch.length;
+        }
+    }
+
+    console.log(`✅ Wrote ${written}/${places.length} places to Supabase`);
+    return true;
+}
+
+async function writeToJson(places: MappedPlace[]): Promise<void> {
+    const fs = await import('fs');
+    const outputPath = 'place-index.json';
+    fs.writeFileSync(outputPath, JSON.stringify(places, null, 2));
+    console.log(`📄 Saved ${places.length} places to ${outputPath}`);
 }
 
 async function main() {
@@ -93,81 +167,42 @@ async function main() {
     console.log(`   ${BOSTON_NEIGHBORHOODS.length} neighborhoods × ${PLACE_TYPES.length} categories`);
     console.log('');
 
-    const allPlaces = new Map<string, any>(); // dedupe by place ID
-    const results: SeedResult[] = [];
+    const allPlaces = new Map<string, MappedPlace>();
 
     for (const hood of BOSTON_NEIGHBORHOODS) {
         console.log(`📍 ${hood.name}`);
 
         for (const type of PLACE_TYPES) {
-            // Throttle to respect API rate limits
             await sleep(200);
 
-            const places = await searchNearby(
+            const rawPlaces = await searchNearby(
                 { lat: hood.lat, lng: hood.lng },
                 type
             );
 
             let newCount = 0;
-            for (const p of places) {
+            for (const p of rawPlaces) {
                 if (!allPlaces.has(p.id)) {
-                    allPlaces.set(p.id, {
-                        ...mapPlace(p),
-                        neighborhood: hood.name,
-                        seedCategory: type,
-                    });
+                    allPlaces.set(p.id, mapPlace(p, hood.name, type));
                     newCount++;
                 }
             }
 
-            console.log(`   ${type}: ${places.length} found, ${newCount} new`);
-
-            results.push({
-                neighborhood: hood.name,
-                type,
-                count: newCount,
-                places: places.map(mapPlace),
-            });
+            console.log(`   ${type}: ${rawPlaces.length} found, ${newCount} new`);
         }
     }
 
-    // Summary
     console.log('\n─────────────────────────────────────');
     console.log(`✅ Total unique places: ${allPlaces.size}`);
-    console.log('');
 
-    // Write index to JSON for now (Sprint 2: write to PostgreSQL)
-    const indexData = Array.from(allPlaces.values());
-    const outputPath = 'place-index.json';
+    const places = Array.from(allPlaces.values());
 
-    const fs = await import('fs');
-    fs.writeFileSync(outputPath, JSON.stringify(indexData, null, 2));
-    console.log(`📄 Saved to ${outputPath}`);
-}
-
-function mapPlace(raw: any): any {
-    const priceLevelMap: Record<string, number> = {
-        PRICE_LEVEL_FREE: 0,
-        PRICE_LEVEL_INEXPENSIVE: 1,
-        PRICE_LEVEL_MODERATE: 2,
-        PRICE_LEVEL_EXPENSIVE: 3,
-        PRICE_LEVEL_VERY_EXPENSIVE: 4,
-    };
-
-    return {
-        id: raw.id,
-        name: raw.displayName?.text || '',
-        address: raw.formattedAddress || '',
-        location: raw.location || { latitude: 0, longitude: 0 },
-        rating: raw.rating || 0,
-        ratingCount: raw.userRatingCount || 0,
-        priceLevel: priceLevelMap[raw.priceLevel] ?? 2,
-        category: raw.primaryType || 'restaurant',
-        photos: (raw.photos || []).slice(0, 3).map((p: any) => p.name),
-        openNow: raw.regularOpeningHours?.openNow,
-        website: raw.websiteUri || '',
-        phoneNumber: raw.nationalPhoneNumber || '',
-    };
+    // Try Supabase first, fallback to JSON
+    const wroteToDb = await writeToSupabase(places);
+    if (!wroteToDb) {
+        console.log('⚠️  No Supabase credentials — falling back to JSON file');
+        await writeToJson(places);
+    }
 }
 
 function sleep(ms: number): Promise<void> {

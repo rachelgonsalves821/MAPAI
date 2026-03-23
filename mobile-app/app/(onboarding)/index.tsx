@@ -66,14 +66,13 @@ const styles = StyleSheet.create({
     marginTop: Spacing.xl,
   },
   title: {
-    fontFamily: Typography.fontFamily.heading,
+    fontWeight: '700',
     fontSize: Typography.sizes['3xl'],
     color: Colors.textPrimary,
     textAlign: 'center',
     marginBottom: Spacing.base,
   },
   subtitle: {
-    fontFamily: Typography.fontFamily.body,
     fontSize: Typography.sizes.md,
     color: Colors.textSecondary,
     textAlign: 'center',
@@ -97,7 +96,7 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   buttonText: {
-    fontFamily: Typography.fontFamily.bodySemiBold,
+    fontWeight: '600',
     fontSize: Typography.sizes.md,
     color: Colors.textOnBrand,
   },

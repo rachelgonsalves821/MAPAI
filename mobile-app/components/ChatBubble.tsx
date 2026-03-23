@@ -67,7 +67,7 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 12,
   },
   bubbleUser: {
-    backgroundColor: '#0558E8', // Electric Blue
+    backgroundColor: '#1D3E91', // Navy
     borderTopLeftRadius: 12,
     borderTopRightRadius: 12,
     borderBottomLeftRadius: 12,

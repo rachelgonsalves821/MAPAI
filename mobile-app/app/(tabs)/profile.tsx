@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, BorderRadius, Shadows } from '@/constants/theme';
+import { useAuth } from '@/context/AuthContext';
 
 const PREFERENCE_CARDS = [
     {
@@ -47,6 +48,7 @@ const PREFERENCE_CARDS = [
 ];
 
 export default function ProfileScreen() {
+    const { user } = useAuth();
     return (
         <View style={styles.container}>
             <View style={styles.header}>
@@ -67,7 +69,7 @@ export default function ProfileScreen() {
                         <Ionicons name="person" size={32} color={Colors.brandViolet} />
                     </View>
                     <View style={styles.userInfo}>
-                        <Text style={styles.userName}>Rachel Gonsalves</Text>
+                        <Text style={styles.userName}>{user?.displayName || 'User'}</Text>
                         <Text style={styles.userEmail}>Mapai Alpha · Boston</Text>
                     </View>
                 </View>
@@ -144,7 +146,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.05)',
+        borderColor: Colors.surfaceBorder,
     },
     scrollView: {
         flex: 1,
@@ -156,12 +158,12 @@ const styles = StyleSheet.create({
     userCard: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: 'rgba(22, 22, 29, 0.9)',
+        backgroundColor: '#FFFFFF',
         borderRadius: 24,
         padding: 20,
         marginBottom: 32,
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.1)',
+        borderColor: Colors.surfaceBorder,
         ...Shadows.md,
     },
     avatarCircle: {
@@ -212,12 +214,12 @@ const styles = StyleSheet.create({
         color: Colors.brandViolet,
     },
     prefCard: {
-        backgroundColor: 'rgba(22, 22, 29, 0.6)',
+        backgroundColor: '#FFFFFF',
         borderRadius: 20,
         padding: 16,
         marginBottom: 16,
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.05)',
+        borderColor: Colors.surfaceBorder,
     },
     prefCardHeader: {
         flexDirection: 'row',
@@ -256,7 +258,7 @@ const styles = StyleSheet.create({
     },
     confidenceBar: {
         height: 3,
-        backgroundColor: 'rgba(255,255,255,0.05)',
+        backgroundColor: Colors.surfaceElevated,
         borderRadius: 2,
         overflow: 'hidden',
     },

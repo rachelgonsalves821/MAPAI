@@ -1,25 +1,23 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, TouchableOpacity, Text, Platform, Animated, Dimensions } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, StyleSheet, TouchableOpacity, Text, Platform } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors, Typography, Spacing, BorderRadius, Shadows } from '@/constants/theme';
+import { Colors, Shadows } from '@/constants/theme';
 import ExploreView from '@/components/ExploreView';
-import { Place, LatLng } from '@/types';
+import { Place } from '@/types';
 import { decodePolyline } from '@/utils/polyline';
 import { useNearbyPlaces, useRoutes } from '@/services/api/hooks';
+import { useUIStore } from '@/store/uiStore';
 
 export default function MapScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ selectedPlaceId?: string }>();
-  
+  const { openChat } = useUIStore();
+
   const [selectedPlaceId, setSelectedPlaceId] = useState<string | undefined>();
   const [selectedRouteMode, setSelectedRouteMode] = useState<string | undefined>();
 
-  // Use React Query for discovery state
-  const { 
-    data: places = [], 
-    isLoading: loading 
-  } = useNearbyPlaces({
+  const { data: places = [] } = useNearbyPlaces({
     lat: 42.3601,
     lng: -71.0589,
     radius: 3000
@@ -27,10 +25,7 @@ export default function MapScreen() {
 
   const selectedPlace = places.find((p: Place) => p.id === (params.selectedPlaceId || selectedPlaceId));
 
-  // Use React Query for multi-modal routes
-  const { 
-    data: availableRoutes = [] 
-  } = useRoutes({
+  const { data: availableRoutes = [] } = useRoutes({
     origin_lat: 42.3601,
     origin_lng: -71.0589,
     dest_lat: selectedPlace?.location.latitude || 0,
@@ -40,15 +35,13 @@ export default function MapScreen() {
 
   const selectedRoute = availableRoutes.find((r: any) => r.mode === selectedRouteMode) || availableRoutes[0];
 
-  // Effect to handle initial selection from URL params
   useEffect(() => {
     if (params.selectedPlaceId && params.selectedPlaceId !== selectedPlaceId) {
       setSelectedPlaceId(params.selectedPlaceId);
-      setSelectedRouteMode(undefined); // Reset route mode when place changes
+      setSelectedRouteMode(undefined);
     }
   }, [params.selectedPlaceId]);
 
-  // Effect to set default route mode if availableRoutes change and no mode is selected
   useEffect(() => {
     if (availableRoutes.length > 0 && !selectedRouteMode) {
       setSelectedRouteMode(availableRoutes[0].mode);
@@ -57,54 +50,47 @@ export default function MapScreen() {
 
   const handlePlaceSelect = (place: Place) => {
     setSelectedPlaceId(place.id);
-    setSelectedRouteMode(undefined); // Reset route mode when a new place is selected
-    
-    // Update URL without full navigation
+    setSelectedRouteMode(undefined);
     router.setParams({ selectedPlaceId: place.id });
   };
 
   const navigateToSearch = (query?: string) => {
+    openChat();
     router.push({
-      pathname: '/search' as any,
+      pathname: '/(tabs)/search' as any,
       params: query ? { query } : {}
     });
   };
 
   return (
     <View style={styles.container}>
-      <ExploreView 
+      <ExploreView
         places={places}
         onPlaceSelect={handlePlaceSelect}
         selectedPlace={selectedPlace}
         routePoints={selectedRoute ? decodePolyline(selectedRoute.polyline) : undefined}
       />
 
-      {/* Route Selector (shown when a place is selected) */}
+      {/* Route Selector */}
       {selectedPlace && availableRoutes.length > 0 && (
         <View style={styles.routeSelectorContainer}>
           <View style={styles.routeSelector}>
             {availableRoutes.map((route: any) => (
               <TouchableOpacity
                 key={route.mode}
-                style={[
-                  styles.routeTab,
-                  selectedRoute?.mode === route.mode && styles.routeTabActive
-                ]}
+                style={[styles.routeTab, selectedRoute?.mode === route.mode && styles.routeTabActive]}
                 onPress={() => setSelectedRouteMode(route.mode)}
               >
-                <Ionicons 
+                <Ionicons
                   name={
                     route.mode === 'walking' ? 'walk' :
                     route.mode === 'transit' ? 'bus' :
                     route.mode === 'cycling' ? 'bicycle' : 'car'
-                  } 
-                  size={20} 
-                  color={selectedRoute?.mode === route.mode ? Colors.brandViolet : Colors.textSecondary} 
+                  }
+                  size={20}
+                  color={selectedRoute?.mode === route.mode ? Colors.brandBlue : Colors.textSecondary}
                 />
-                <Text style={[
-                  styles.routeTabText,
-                  selectedRoute?.mode === route.mode && styles.routeTabTextActive
-                ]}>
+                <Text style={[styles.routeTabText, selectedRoute?.mode === route.mode && styles.routeTabTextActive]}>
                   {route.description.split(':')[1].trim()}
                 </Text>
               </TouchableOpacity>
@@ -113,40 +99,37 @@ export default function MapScreen() {
         </View>
       )}
 
-      {/* Floating Header (Gen Z styled) */}
+      {/* Floating Header */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.neighborhoodPill}>
-          <Ionicons name="location" size={16} color={Colors.brandViolet} />
+          <Ionicons name="location" size={16} color={Colors.brandBlue} />
           <Text style={styles.neighborhoodText}>South End, Boston</Text>
           <Ionicons name="chevron-down" size={14} color={Colors.textSecondary} />
         </TouchableOpacity>
-        
-        <TouchableOpacity style={styles.profileButton} onPress={() => router.push('/profile')}>
-          <View style={styles.avatarPlaceholder}>
-             <Ionicons name="person" size={20} color={Colors.textSecondary} />
-          </View>
+
+        <TouchableOpacity style={styles.profileButton} onPress={() => router.push('/(tabs)/profile' as any)}>
+          <Ionicons name="person" size={20} color={Colors.textSecondary} />
         </TouchableOpacity>
       </View>
 
       {/* Chat Pill Overlay */}
       <View style={styles.bottomOverlay}>
-        <TouchableOpacity 
-          style={styles.chatPill} 
+        <TouchableOpacity
+          style={styles.chatPill}
           activeOpacity={0.9}
           onPress={() => navigateToSearch()}
         >
           <Ionicons name="sparkles" size={20} color={Colors.brandViolet} />
           <Text style={styles.chatPillText}>Ask Mapai anything...</Text>
           <View style={styles.micIcon}>
-            <Ionicons name="mic" size={18} color={Colors.textTertiary} />
+            <Ionicons name="mic" size={18} color="#FFFFFF" />
           </View>
         </TouchableOpacity>
-        
-        {/* Quick action chips */}
+
         <View style={styles.chipsRow}>
-          {['Quiet coffee', 'Late night food', 'Ramen'].map((chip) => (
-            <TouchableOpacity 
-              key={chip} 
+          {['Coffee nearby', 'Lunch under $15', 'Open now'].map((chip) => (
+            <TouchableOpacity
+              key={chip}
               style={styles.chip}
               onPress={() => navigateToSearch(chip)}
             >
@@ -176,12 +159,12 @@ const styles = StyleSheet.create({
   neighborhoodPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(22, 22, 29, 0.9)',
+    backgroundColor: '#FFFFFF',
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 25,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: Colors.surfaceBorder,
     gap: 8,
     ...Shadows.md,
   },
@@ -194,24 +177,16 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: 'rgba(22, 22, 29, 0.9)',
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: Colors.surfaceBorder,
     ...Shadows.md,
-  },
-  avatarPlaceholder: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Colors.surfaceElevated,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   bottomOverlay: {
     position: 'absolute',
-    bottom: Platform.OS === 'ios' ? 120 : 100, // Above tab bar
+    bottom: Platform.OS === 'ios' ? 120 : 100,
     left: 20,
     right: 20,
     gap: 12,
@@ -219,27 +194,23 @@ const styles = StyleSheet.create({
   chatPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF', // White background per brand guide
+    backgroundColor: '#FFFFFF',
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 30,
     borderWidth: 1,
-    borderColor: '#D1D5DB', // Cloud
+    borderColor: Colors.surfaceBorder,
     gap: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 16,
-    elevation: 4,
+    ...Shadows.md,
   },
   chatPillText: {
     flex: 1,
-    color: '#6B7280', // Stone
-    fontSize: 15, // Body Default
+    color: Colors.textSecondary,
+    fontSize: 15,
     fontWeight: '400',
   },
   micIcon: {
-    backgroundColor: '#0558E8', // Electric Blue circle
+    backgroundColor: Colors.brandBlue,
     width: 36,
     height: 36,
     borderRadius: 18,
@@ -251,12 +222,13 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   chip: {
-    backgroundColor: 'rgba(22, 22, 29, 0.8)',
+    backgroundColor: '#FFFFFF',
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
+    borderColor: Colors.surfaceBorder,
+    ...Shadows.sm,
   },
   chipText: {
     color: Colors.textPrimary,
@@ -265,18 +237,18 @@ const styles = StyleSheet.create({
   },
   routeSelectorContainer: {
     position: 'absolute',
-    top: Platform.OS === 'ios' ? 120 : 100, // Below header
+    top: Platform.OS === 'ios' ? 120 : 100,
     left: 20,
     right: 20,
     zIndex: 10,
   },
   routeSelector: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(22, 22, 29, 0.9)',
+    backgroundColor: '#FFFFFF',
     borderRadius: 20,
     padding: 6,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: Colors.surfaceBorder,
     justifyContent: 'space-around',
     ...Shadows.md,
   },
@@ -290,9 +262,9 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   routeTabActive: {
-    backgroundColor: 'rgba(139, 92, 246, 0.15)',
+    backgroundColor: 'rgba(29, 62, 145, 0.08)',
     borderWidth: 1,
-    borderColor: 'rgba(139, 92, 246, 0.2)',
+    borderColor: 'rgba(29, 62, 145, 0.15)',
   },
   routeTabText: {
     color: Colors.textSecondary,
@@ -300,6 +272,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   routeTabTextActive: {
-    color: Colors.brandViolet,
+    color: Colors.brandBlue,
   },
 });

@@ -108,13 +108,12 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.lg,
   },
   title: {
-    fontFamily: Typography.fontFamily.heading,
+    fontWeight: '700',
     fontSize: Typography.sizes.xl,
     color: Colors.textPrimary,
     marginBottom: Spacing.xs,
   },
   subtitle: {
-    fontFamily: Typography.fontFamily.body,
     fontSize: Typography.sizes.base,
     color: Colors.textSecondary,
     marginBottom: Spacing.lg,
@@ -146,7 +145,7 @@ const styles = StyleSheet.create({
     borderColor: Colors.brandBlue,
   },
   interestLabel: {
-    fontFamily: Typography.fontFamily.bodyMedium,
+    fontWeight: '500',
     fontSize: Typography.sizes.base,
     color: Colors.textSecondary,
   },
@@ -170,7 +169,7 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   buttonText: {
-    fontFamily: Typography.fontFamily.bodySemiBold,
+    fontWeight: '600',
     fontSize: Typography.sizes.md,
     color: Colors.textOnBrand,
   },

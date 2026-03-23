@@ -5,6 +5,7 @@
  */
 
 import { config } from '../config.js';
+import { getSupabase } from '../db/supabase-client.js';
 import { UserMemoryContext } from './ai-orchestrator.js';
 
 const PLACES_BASE = 'https://places.googleapis.com/v1/places';
@@ -68,8 +69,8 @@ export class PlacesService {
                 return [];
             }
 
-            const data = await response.json();
-            const places = (data.places || []).map(this.mapGooglePlace);
+            const data = (await response.json()) as any;
+            const places = (data.places || []).map((p: any) => this.mapGooglePlace(p));
 
             placeCache.set(cacheKey, { data: places, ts: Date.now() });
             return this.reRank(places, input.userMemory);
@@ -121,8 +122,8 @@ export class PlacesService {
                 return [];
             }
 
-            const data = await response.json();
-            const places = (data.places || []).map(this.mapGooglePlace);
+            const data = (await response.json()) as any;
+            const places = (data.places || []).map((p: any) => this.mapGooglePlace(p));
 
             placeCache.set(cacheKey, { data: places, ts: Date.now() });
             return this.reRank(places, input.userMemory).slice(0, input.maxResults);
@@ -140,34 +141,43 @@ export class PlacesService {
         userId: string,
         userMemory: UserMemoryContext
     ): Promise<any | null> {
-        const cacheKey = `detail:${placeId}`;
+            const cacheKey = `detail:${placeId}`;
         const cached = placeCache.get(cacheKey);
+        
+        let place: any;
         if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
-            return { ...cached.data, ...this.scorePlace(cached.data, userMemory) };
+            place = cached.data;
+        } else {
+            try {
+                const response = await fetch(`${PLACES_BASE}/${placeId}`, {
+                    headers: {
+                        'X-Goog-Api-Key': config.google.placesApiKey,
+                        'X-Goog-FieldMask':
+                            'id,displayName,formattedAddress,location,rating,priceLevel,' +
+                            'primaryType,photos,regularOpeningHours,websiteUri,nationalPhoneNumber,' +
+                            'editorialSummary,reviews',
+                    },
+                });
+
+                if (!response.ok) return null;
+
+                const raw = await response.json();
+                place = this.mapGooglePlace(raw);
+                placeCache.set(cacheKey, { data: place, ts: Date.now() });
+            } catch (err) {
+                console.error('Place details error:', err);
+                return null;
+            }
         }
 
-        try {
-            const response = await fetch(`${PLACES_BASE}/${placeId}`, {
-                headers: {
-                    'X-Goog-Api-Key': config.google.placesApiKey,
-                    'X-Goog-FieldMask':
-                        'id,displayName,formattedAddress,location,rating,priceLevel,' +
-                        'primaryType,photos,regularOpeningHours,websiteUri,nationalPhoneNumber,' +
-                        'editorialSummary,reviews',
-                },
-            });
+        // Fetch social signals from Supabase
+        const socialSignals = await this.getSocialSignals(placeId);
 
-            if (!response.ok) return null;
-
-            const raw = await response.json();
-            const place = this.mapGooglePlace(raw);
-
-            placeCache.set(cacheKey, { data: place, ts: Date.now() });
-            return { ...place, ...this.scorePlace(place, userMemory) };
-        } catch (err) {
-            console.error('Place details error:', err);
-            return null;
-        }
+        return {
+            ...place,
+            ...this.scorePlace(place, userMemory),
+            socialSignals,
+        };
     }
 
     /**
@@ -259,5 +269,39 @@ export class PlacesService {
             matchScore: score,
             matchReasons: reasons.length > 0 ? reasons.slice(0, 2) : ['Nearby option'],
         };
+    }
+
+    /**
+     * Fetch social signals (Reddit/IG/Google) from Supabase for a specific place.
+     */
+    private async getSocialSignals(googlePlaceId: string): Promise<any[]> {
+        const supabase = getSupabase();
+        if (!supabase) return [];
+
+        try {
+            // First, get our internal place ID
+            const { data: placeData } = await supabase
+                .from('places')
+                .select('id')
+                .eq('google_place_id', googlePlaceId)
+                .maybeSingle();
+
+            if (!placeData) return [];
+
+            const internalId = (placeData as any).id;
+
+            const { data: signals, error } = await supabase
+                .from('social_signals')
+                .select('*')
+                .eq('place_id', internalId)
+                .order('created_at', { ascending: false })
+                .limit(5);
+
+            if (error) throw error;
+            return signals || [];
+        } catch (err) {
+            console.error('Error fetching social signals:', err);
+            return [];
+        }
     }
 }

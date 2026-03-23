@@ -2,10 +2,13 @@
  * Mapai Backend — AI Orchestrator Service
  * Handles prompt construction, Claude API calls, and response parsing.
  * PRD §6.3: System persona + user memory + situational context + user message.
+ *
+ * Sessions persist to Supabase when available, in-memory fallback otherwise.
  */
 
 import Anthropic from '@anthropic-ai/sdk';
 import { config } from '../config.js';
+import { getSupabase, hasDatabase } from '../db/supabase-client.js';
 import { v4 as uuid } from 'uuid';
 
 interface ChatInput {
@@ -45,8 +48,14 @@ export interface UserMemoryContext {
     dietaryRestrictions: string[];
 }
 
-// In-memory session store (Redis in production)
-const sessions = new Map<string, { messages: Array<{ role: string; content: string }> }>();
+interface SessionMessage {
+    role: string;
+    content: string;
+    timestamp: string;
+}
+
+// In-memory session fallback
+const inMemorySessions = new Map<string, { messages: SessionMessage[] }>();
 
 export class AiOrchestrator {
     private client: Anthropic;
@@ -58,20 +67,22 @@ export class AiOrchestrator {
     async chat(input: ChatInput): Promise<ChatOutput> {
         const sessionId = input.sessionId || uuid();
 
-        // Get or create session
-        if (!sessions.has(sessionId)) {
-            sessions.set(sessionId, { messages: [] });
-        }
-        const session = sessions.get(sessionId)!;
+        // Load session history
+        const messages = await this.loadSession(sessionId, input.userId);
 
         // Build system prompt (PRD §6.3.2)
         const systemPrompt = this.buildSystemPrompt(input.userMemory, input.location, input.context);
 
-        // Add user message to session
-        session.messages.push({ role: 'user', content: input.message });
+        // Add user message
+        const newMessage: SessionMessage = {
+            role: 'user',
+            content: input.message,
+            timestamp: new Date().toISOString(),
+        };
+        messages.push(newMessage);
 
         // Keep last 20 messages to stay within context window
-        const recentMessages = session.messages.slice(-20);
+        const recentMessages = messages.slice(-20);
 
         try {
             const response = await this.client.messages.create({
@@ -89,11 +100,24 @@ export class AiOrchestrator {
                     ? response.content[0].text
                     : '';
 
+            if (config.isDev) {
+              console.log('\n[DEBUG] RAW CLAUDE RESPONSE:');
+              console.log(rawText);
+              console.log('[DEBUG] END RAW RESPONSE\n');
+            }
+
             // Parse structured output
             const parsed = this.parseResponse(rawText);
 
-            // Add assistant response to session
-            session.messages.push({ role: 'assistant', content: parsed.text });
+            // Add assistant response
+            messages.push({
+                role: 'assistant',
+                content: parsed.text,
+                timestamp: new Date().toISOString(),
+            });
+
+            // Persist session
+            await this.saveSession(sessionId, input.userId, messages);
 
             return {
                 text: parsed.text,
@@ -111,6 +135,47 @@ export class AiOrchestrator {
             };
         }
     }
+
+    // ─── Session persistence ─────────────────────────────
+
+    private async loadSession(sessionId: string, userId: string): Promise<SessionMessage[]> {
+        if (!hasDatabase()) {
+            return inMemorySessions.get(sessionId)?.messages || [];
+        }
+
+        const supabase = getSupabase()!;
+        const { data } = await (supabase
+            .from('chat_sessions') as any)
+            .select('messages')
+            .eq('id', sessionId)
+            .maybeSingle();
+
+        return (data?.messages as SessionMessage[]) || [];
+    }
+
+    private async saveSession(
+        sessionId: string,
+        userId: string,
+        messages: SessionMessage[]
+    ): Promise<void> {
+        if (!hasDatabase()) {
+            inMemorySessions.set(sessionId, { messages });
+            return;
+        }
+
+        const supabase = getSupabase()!;
+        await (supabase.from('chat_sessions') as any).upsert(
+            {
+                id: sessionId,
+                user_id: userId,
+                messages: messages as any,
+                updated_at: new Date().toISOString(),
+            },
+            { onConflict: 'id' }
+        );
+    }
+
+    // ─── Prompt construction ─────────────────────────────
 
     private buildSystemPrompt(
         memory: UserMemoryContext,
@@ -131,7 +196,7 @@ export class AiOrchestrator {
         return `You are Mapai, an AI-powered local discovery assistant for Boston, Massachusetts.
 
 ## Your Role
-You help users discover places to eat, drink, work, and explore in Boston. You are warm, knowledgeable, opinionated (in a friendly way), and deeply familiar with Boston's neighborhoods.
+You help users discover places to eat, drink, work, and explore in Boston. You are warm, knowledgeable, opinionated, and deeply familiar with Boston's neighborhoods.
 
 ## User Profile
 ${memorySummary || '(New user — preferences still being learned)'}
@@ -142,28 +207,88 @@ ${memorySummary || '(New user — preferences still being learned)'}
 - Time: ${context?.time_of_day || new Date().toLocaleTimeString('en-US', { timeZone: 'America/New_York' })}
 
 ## Response Rules
-1. Be conversational and warm — you're a knowledgeable local friend, not a search engine
-2. When recommending places, explain WHY they match this specific user
-3. Proactively ask clarifying questions to narrow down the perfect spot
-4. Reference Boston neighborhoods specifically (Back Bay, South End, North End, Somerville, etc.)
-5. If you detect a place discovery intent, include the following JSON block at the END of your response (after your conversational text):
+1. Be conversational and warm — you're a knowledgeable local friend, not a search engine.
+2. ALWAYS explain WHY each recommended place fits this specific user based on their profile (cuisine preferences, price range, ambiance). Be specific: "Since you love Japanese food and prefer cozy spots..." — not a generic description.
+3. Keep your conversational text to 2–4 sentences. Do not list or enumerate places — that's what the map cards are for.
+4. Reference Boston neighborhoods specifically (Back Bay, South End, North End, Somerville, Fenway, Cambridge, etc.).
+5. If the query is vague, ask ONE focused clarifying question.
+
+## CRITICAL: mapai_intent Block
+When the user's message involves finding, discovering, or navigating to places, you MUST include a \`mapai_intent\` JSON block at the END of your response. This triggers the map to show real place results.
+
+Rules:
+- It MUST appear after your conversational text, separated by a blank line
+- The JSON must be valid and complete — never truncate or omit required fields
+- "search_query" must be a descriptive Google Places-style text query
+- Always include "preference_insights" — even if empty array
+- NEVER mention or reference this block in your conversational text
 
 \`\`\`mapai_intent
 {
-  "search_query": "text query for Google Places",
+  "search_query": "<descriptive Google Places query>",
   "intent": {
-    "type": "food_discovery|drink_discovery|activity_discovery|general",
-    "category": "optional category",
-    "neighborhood": "optional neighborhood"
+    "type": "food_discovery|drink_discovery|coffee_discovery|activity_discovery|navigation|general",
+    "category": "restaurant|cafe|bar|coffee_shop|bakery|park|...",
+    "neighborhood": "<Boston neighborhood or empty string>"
   },
   "preference_insights": [
-    {"type": "cuisine_like|cuisine_dislike|price_preference|ambiance_preference|dietary_restriction", "value": "...", "confidence": 0.0-1.0}
+    {"type": "cuisine_like|cuisine_dislike|price_preference|ambiance_preference|dietary_restriction", "value": "<value>", "confidence": 0.0}
   ]
 }
 \`\`\`
 
-Only include the JSON block when you detect the user wants to find a place. For general conversation, just respond naturally.`;
+## Few-Shot Examples
+
+### Example 1 — Ramen query (user likes Japanese food)
+User: "find me great ramen in Boston"
+
+Your response:
+"Since you love Japanese cuisine, you're going to be right at home — South End and Back Bay have some seriously underrated ramen spots with rich tonkotsu broths and housemade noodles. Pulling up the best matches for you now.
+
+\`\`\`mapai_intent
+{
+  "search_query": "ramen restaurant boston",
+  "intent": {
+    "type": "food_discovery",
+    "category": "restaurant",
+    "neighborhood": "South End"
+  },
+  "preference_insights": [
+    {"type": "cuisine_like", "value": "ramen", "confidence": 0.9},
+    {"type": "cuisine_like", "value": "Japanese", "confidence": 0.8}
+  ]
+}
+\`\`\`"
+
+### Example 2 — Coffee with ambiance preference
+User: "I need a cozy coffee shop to work from"
+
+Your response:
+"Given that you love cozy spots, I'm thinking somewhere with warm lighting, good WiFi, and just the right buzz — not too loud. Beacon Hill and Cambridge have some perfect fits. Let me pull them up.
+
+\`\`\`mapai_intent
+{
+  "search_query": "cozy coffee shop boston work laptop wifi",
+  "intent": {
+    "type": "coffee_discovery",
+    "category": "cafe",
+    "neighborhood": "Beacon Hill"
+  },
+  "preference_insights": [
+    {"type": "ambiance_preference", "value": "cozy", "confidence": 0.85},
+    {"type": "ambiance_preference", "value": "work-friendly", "confidence": 0.8}
+  ]
+}
+\`\`\`"
+
+### Example 3 — General conversation (no intent block)
+User: "What's the difference between North End and South End?"
+
+Your response:
+"Great question! North End is Boston's Italian neighborhood — cobblestone streets, old-world charm, incredible pasta and cannoli. South End is hipper and more diverse, with a thriving restaurant scene, art galleries, and a strong community feel. Both are incredible — which vibe is calling you tonight?"`;
     }
+
+    // ─── Response parsing ────────────────────────────────
 
     private parseResponse(rawText: string): {
         text: string;
@@ -171,7 +296,6 @@ Only include the JSON block when you detect the user wants to find a place. For 
         discoveryIntent?: any;
         preferenceInsights: PreferenceInsight[];
     } {
-        // Extract structured intent block if present
         const intentMatch = rawText.match(/```mapai_intent\s*([\s\S]*?)```/);
 
         let text = rawText;
@@ -180,14 +304,13 @@ Only include the JSON block when you detect the user wants to find a place. For 
         let preferenceInsights: PreferenceInsight[] = [];
 
         if (intentMatch) {
-            // Remove the JSON block from the conversational text
             text = rawText.replace(/```mapai_intent[\s\S]*?```/, '').trim();
 
             try {
                 const parsed = JSON.parse(intentMatch[1]);
-                searchQuery = parsed.search_query;
+                searchQuery = parsed.search_query || parsed.searchQuery;
                 discoveryIntent = parsed.intent;
-                preferenceInsights = parsed.preference_insights || [];
+                preferenceInsights = parsed.preference_insights || parsed.preferenceInsights || [];
             } catch {
                 // JSON parse failed — just use the text as-is
             }

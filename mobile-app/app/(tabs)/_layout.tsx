@@ -25,21 +25,21 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: '#0558E8', // Electric Blue
-        tabBarInactiveTintColor: '#6B7280', // Stone
+        tabBarActiveTintColor: Colors.brandBlue,
+        tabBarInactiveTintColor: Colors.textSecondary,
         tabBarStyle: {
-          backgroundColor: 'rgba(255, 255, 255, 0.9)', // White with transparency for blur
-          borderTopWidth: 0,
+          backgroundColor: '#FFFFFF',
+          borderTopWidth: 1,
+          borderTopColor: Colors.surfaceBorder,
           height: Platform.OS === 'ios' ? 88 : 64,
           paddingBottom: Platform.OS === 'ios' ? 32 : 10,
           paddingTop: 8,
           position: 'absolute',
-          borderTopColor: 'transparent',
           elevation: 0,
         },
         tabBarLabelStyle: {
           fontSize: 10,
-          fontFamily: 'CabinetGrotesk-Medium',
+          fontWeight: '500',
           marginTop: 2,
         },
       }}
@@ -107,6 +107,6 @@ const styles = StyleSheet.create({
     width: 4,
     height: 4,
     borderRadius: 2,
-    backgroundColor: '#0558E8', // Electric Blue dot per brand guide
+    backgroundColor: Colors.brandBlue,
   },
 });

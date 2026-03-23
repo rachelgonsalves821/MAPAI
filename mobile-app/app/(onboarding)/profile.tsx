@@ -4,11 +4,13 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Colors, Typography, Spacing, BorderRadius } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import apiClient from '@/services/api/client';
+import { useAuth } from '@/context/AuthContext';
 
 export default function ProfileScreen() {
   const router = useRouter();
   const { interests } = useLocalSearchParams<{ interests: string }>();
-  
+  const { updateUser } = useAuth();
+
   const [name, setName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -37,7 +39,8 @@ export default function ProfileScreen() {
       const response = await apiClient.post('/v1/user/onboarding', payload);
       
       if (response.data.success) {
-        // Navigate to the main app
+        // Mark onboarding complete BEFORE navigating to prevent routing loop
+        updateUser({ onboardingComplete: true });
         router.replace('/(tabs)');
       } else {
         throw new Error('Onboarding failed');
@@ -125,13 +128,12 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.lg,
   },
   title: {
-    fontFamily: Typography.fontFamily.heading,
     fontSize: Typography.sizes.xl,
+    fontWeight: '700',
     color: Colors.textPrimary,
     marginBottom: Spacing.xs,
   },
   subtitle: {
-    fontFamily: Typography.fontFamily.body,
     fontSize: Typography.sizes.base,
     color: Colors.textSecondary,
     marginBottom: Spacing.lg,
@@ -145,21 +147,20 @@ const styles = StyleSheet.create({
     marginBottom: Spacing['3xl'],
   },
   label: {
-    fontFamily: Typography.fontFamily.bodySemiBold,
     fontSize: Typography.sizes.sm,
+    fontWeight: '600',
     color: Colors.brandBlue,
     marginBottom: Spacing.sm,
     textTransform: 'uppercase',
     letterSpacing: 1,
   },
   input: {
-    backgroundColor: Colors.surface,
+    backgroundColor: '#F9FAFB',
     height: 56,
-    borderRadius: BorderRadius.lg,
+    borderRadius: BorderRadius.sm,
     paddingHorizontal: Spacing.base,
     color: Colors.textPrimary,
     fontSize: Typography.sizes.md,
-    fontFamily: Typography.fontFamily.body,
     borderWidth: 1,
     borderColor: Colors.surfaceBorder,
   },
@@ -171,8 +172,8 @@ const styles = StyleSheet.create({
     borderColor: Colors.surfaceBorder,
   },
   summaryTitle: {
-    fontFamily: Typography.fontFamily.bodySemiBold,
     fontSize: Typography.sizes.base,
+    fontWeight: '600',
     color: Colors.textPrimary,
     marginBottom: Spacing.base,
   },
@@ -188,8 +189,8 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.sm,
   },
   badgeText: {
-    fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.sizes.sm,
+    fontWeight: '500',
     color: Colors.brandBlue,
   },
   footer: {
@@ -209,8 +210,8 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   buttonText: {
-    fontFamily: Typography.fontFamily.bodySemiBold,
     fontSize: Typography.sizes.md,
+    fontWeight: '600',
     color: Colors.textOnBrand,
   },
 });

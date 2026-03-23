@@ -3,12 +3,13 @@
  * Batch-fetches Reddit posts mentioning Boston venues and enriches
  * the place index with social signals via Claude summarization.
  *
+ * Writes to Supabase when configured, falls back to social-signals.json.
  * Usage: npx tsx src/pipeline/reddit-ingest.ts
  */
 
 import 'dotenv/config';
 import Anthropic from '@anthropic-ai/sdk';
-import * as fs from 'fs';
+import { getSupabase } from '../db/supabase-client.js';
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-4-5-20250514';
@@ -17,15 +18,13 @@ const REDDIT_BASE = 'https://www.reddit.com';
 const TARGET_SUBREDDITS = ['boston', 'BostonFood', 'CambridgeMA'];
 
 interface SocialSignal {
-    placeId: string;
-    placeName: string;
+    place_id: string;
     source: 'reddit';
     quote: string;
     author: string;
-    date: string;
+    post_date: string;
     sentiment: 'positive' | 'neutral' | 'negative';
-    highlightedAttributes: string[];
-    createdAt: Date;
+    highlighted_attributes: string[];
 }
 
 interface PlaceRecord {
@@ -33,7 +32,35 @@ interface PlaceRecord {
     name: string;
     neighborhood?: string;
     category: string;
-    [key: string]: any;
+}
+
+/**
+ * Load places from Supabase or JSON fallback.
+ */
+async function loadPlaces(): Promise<PlaceRecord[]> {
+    const supabase = getSupabase();
+    if (supabase) {
+        const { data, error } = await supabase
+            .from('places')
+            .select('id, name, neighborhood, category');
+
+        if (!error && data && data.length > 0) {
+            console.log(`📄 Loaded ${data.length} places from Supabase`);
+            return data as PlaceRecord[];
+        }
+    }
+
+    // Fallback to JSON file
+    try {
+        const fs = await import('fs');
+        const raw = fs.readFileSync('place-index.json', 'utf-8');
+        const places = JSON.parse(raw);
+        console.log(`📄 Loaded ${places.length} places from place-index.json`);
+        return places;
+    } catch {
+        console.error('❌ No places found. Run seed-places.ts first.');
+        process.exit(1);
+    }
 }
 
 /**
@@ -51,7 +78,7 @@ async function searchSubreddit(
             headers: { 'User-Agent': 'Mapai/1.0 (data pipeline)' },
         });
         if (!res.ok) return [];
-        const data = await res.json();
+        const data = (await res.json()) as any;
         return data?.data?.children?.map((c: any) => c.data) || [];
     } catch {
         return [];
@@ -64,7 +91,7 @@ async function searchSubreddit(
 async function summarizeWithClaude(
     placeName: string,
     posts: any[]
-): Promise<Omit<SocialSignal, 'placeId' | 'createdAt'>[]> {
+): Promise<Omit<SocialSignal, 'place_id'>[]> {
     if (!ANTHROPIC_API_KEY || posts.length === 0) return [];
 
     const postsText = posts
@@ -93,9 +120,9 @@ Return a JSON array. For each meaningful mention, include:
 {
   "quote": "best verbatim quote (under 150 chars)",
   "author": "u/username",
-  "date": "relative date like '2 weeks ago'",
+  "post_date": "relative date like '2 weeks ago'",
   "sentiment": "positive|neutral|negative",
-  "highlightedAttributes": ["up to 3 attributes like 'great ramen', 'long wait'"]
+  "highlighted_attributes": ["up to 3 attributes like 'great ramen', 'long wait'"]
 }
 
 If no meaningful mentions, return []. Return ONLY the JSON array.`,
@@ -111,7 +138,6 @@ If no meaningful mentions, return []. Return ONLY the JSON array.`,
         return signals.map((s: any) => ({
             ...s,
             source: 'reddit' as const,
-            placeName,
         }));
     } catch (err) {
         console.error(`  Claude error for ${placeName}:`, err);
@@ -119,22 +145,45 @@ If no meaningful mentions, return []. Return ONLY the JSON array.`,
     }
 }
 
+/**
+ * Write signals to Supabase, or fallback to JSON.
+ */
+async function writeSignals(signals: SocialSignal[]): Promise<void> {
+    const supabase = getSupabase();
+    if (supabase && signals.length > 0) {
+        console.log(`\n📤 Writing ${signals.length} signals to Supabase...`);
+
+        const BATCH_SIZE = 50;
+        let written = 0;
+
+        for (let i = 0; i < signals.length; i += BATCH_SIZE) {
+            const batch = signals.slice(i, i + BATCH_SIZE);
+            const { error } = await (supabase.from('social_signals') as any).insert(batch as any[]);
+
+            if (error) {
+                console.error(`  ✗ Batch error:`, error.message);
+            } else {
+                written += batch.length;
+            }
+        }
+
+        console.log(`✅ Wrote ${written}/${signals.length} signals to Supabase`);
+        return;
+    }
+
+    // Fallback to JSON
+    const fs = await import('fs');
+    const outputPath = 'social-signals.json';
+    fs.writeFileSync(outputPath, JSON.stringify(signals, null, 2));
+    console.log(`📄 Saved ${signals.length} signals to ${outputPath}`);
+}
+
 async function main() {
     console.log('📱 Mapai Reddit Social Signal Pipeline');
     console.log(`   Subreddits: ${TARGET_SUBREDDITS.join(', ')}`);
     console.log('');
 
-    // Load place index (from seed-places output)
-    let places: PlaceRecord[] = [];
-    try {
-        const raw = fs.readFileSync('place-index.json', 'utf-8');
-        places = JSON.parse(raw);
-        console.log(`📄 Loaded ${places.length} places from place-index.json`);
-    } catch {
-        console.error('❌ place-index.json not found. Run seed-places.ts first.');
-        process.exit(1);
-    }
-
+    const places = await loadPlaces();
     const allSignals: SocialSignal[] = [];
     let processed = 0;
 
@@ -169,21 +218,16 @@ async function main() {
         for (const signal of signals) {
             allSignals.push({
                 ...signal,
-                placeId: place.id,
-                placeName: place.name,
+                place_id: place.id,
                 source: 'reddit',
-                createdAt: new Date(),
             });
         }
     }
 
-    // Write signals to JSON (Sprint 2: write to PostgreSQL)
-    const outputPath = 'social-signals.json';
-    fs.writeFileSync(outputPath, JSON.stringify(allSignals, null, 2));
+    await writeSignals(allSignals);
 
     console.log('\n─────────────────────────────────────');
-    console.log(`✅ Extracted ${allSignals.length} social signals`);
-    console.log(`📄 Saved to ${outputPath}`);
+    console.log(`✅ Extracted ${allSignals.length} social signals from ${processed} places`);
 }
 
 function sleep(ms: number): Promise<void> {

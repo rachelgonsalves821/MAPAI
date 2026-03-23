@@ -1,205 +1,79 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  TextInput,
+  FlatList,
   TouchableOpacity,
-  ScrollView,
-  KeyboardAvoidingView,
   Platform,
-  Image,
-  Dimensions,
-  ActivityIndicator,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors, Typography, Spacing, BorderRadius, Shadows } from '@/constants/theme';
-import ChatBubble from '@/components/ChatBubble';
-import { useSendMessage } from '@/services/api/hooks';
-import { ChatMessage, Place } from '@/types';
+import { Colors, Shadows } from '@/constants/theme';
+import { useMapStore } from '@/store/mapStore';
+import { Place } from '@/types';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-
-export default function SearchScreen() {
+function PlaceCard({ place }: { place: Place }) {
   const router = useRouter();
-  const params = useLocalSearchParams<{ query?: string }>();
-  const scrollRef = useRef<ScrollView>(null);
-  
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [inputText, setInputText] = useState('');
+  return (
+    <TouchableOpacity
+      style={styles.card}
+      onPress={() => router.push(`/place/${place.id}` as any)}
+      activeOpacity={0.8}
+    >
+      <View style={styles.cardBody}>
+        <View style={styles.cardInfo}>
+          <Text style={styles.cardName} numberOfLines={1}>{place.name}</Text>
+          <Text style={styles.cardAddress} numberOfLines={1}>{place.address}</Text>
+          {place.matchReasons && place.matchReasons.length > 0 && (
+            <Text style={styles.cardReason} numberOfLines={2}>
+              {place.matchReasons[0]}
+            </Text>
+          )}
+        </View>
+        <View style={styles.scoreRing}>
+          <Text style={styles.scoreText}>{place.matchScore}</Text>
+          <Text style={styles.scorePercent}>%</Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+}
 
-  const sendMutation = useSendMessage();
+export default function DiscoverScreen() {
+  const { discoveryPlaces } = useMapStore();
 
-  // Handle initial query from navigation params
-  useEffect(() => {
-    if (params.query) {
-      handleSend(params.query);
-    }
-  }, [params.query]);
-
-  const handleSend = async (text?: string) => {
-    const messageText = text || inputText.trim();
-    if (!messageText || sendMutation.isPending) return;
-
-    const userMsg: ChatMessage = {
-      id: `u-${Date.now()}`,
-      role: 'user',
-      content: messageText,
-      timestamp: new Date(),
-    };
-
-    setMessages(prev => [...prev, userMsg]);
-    setInputText('');
-
-    try {
-      const response = await sendMutation.mutateAsync({
-        message: messageText,
-        session_id: 'session-123',
-        user_id: 'user-123',
-      });
-
-      const aiMsg: ChatMessage = {
-        id: `a-${Date.now()}`,
-        role: 'assistant',
-        content: response.text,
-        timestamp: new Date(),
-        placeResults: response.places
-      };
-
-      setMessages(prev => [...prev, aiMsg]);
-    } catch (error) {
-      console.error('Search error:', error);
-    } finally {
-      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
-    }
-  };
-
-  const isTyping = sendMutation.isPending;
+  if (discoveryPlaces.length === 0) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Discover</Text>
+        </View>
+        <View style={styles.emptyState}>
+          <Ionicons name="map-outline" size={56} color={Colors.textTertiary} />
+          <Text style={styles.emptyTitle}>No results yet</Text>
+          <Text style={styles.emptySubtitle}>
+            Find places by chatting on the Search tab — your results will appear here.
+          </Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
-    <KeyboardAvoidingView 
-      style={styles.container} 
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-    >
-      {/* Premium Search Header */}
+    <View style={styles.container}>
       <View style={styles.header}>
-        <View style={styles.headerTitleContainer}>
-          <Text style={styles.headerTitle}>Discovery</Text>
-          <View style={styles.statusDot} />
-        </View>
-        <TouchableOpacity style={styles.historyButton}>
-          <Ionicons name="time-outline" size={24} color="#6B7280" />
-        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Discover</Text>
+        <Text style={styles.headerCount}>{discoveryPlaces.length} places</Text>
       </View>
-
-      <ScrollView 
-        ref={scrollRef}
-        style={styles.chatList}
-        contentContainerStyle={styles.chatContent}
+      <FlatList
+        data={discoveryPlaces}
+        keyExtractor={(item) => item.id}
+        renderItem={({ item }) => <PlaceCard place={item} />}
+        contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
-      >
-        {messages.length === 0 && (
-          <View style={styles.emptyContainer}>
-            <View style={styles.sparkleIcon}>
-              <Ionicons name="sparkles" size={40} color="#7C3AED" />
-            </View>
-            <Text style={styles.emptyText}>Ask Mapai to find the perfect spot in Boston</Text>
-          </View>
-        )}
-
-        {messages.map((msg) => (
-          <View key={msg.id}>
-            <ChatBubble role={msg.role} content={msg.content} />
-            
-            {msg.placeResults && (
-              <ScrollView 
-                horizontal 
-                showsHorizontalScrollIndicator={false}
-                style={styles.placesContainer}
-                contentContainerStyle={styles.placesContent}
-              >
-                {msg.placeResults.map((place) => (
-                    <TouchableOpacity 
-                      key={place.id} 
-                      style={styles.placeCard}
-                      onPress={() => router.push(`/place/${place.id}`)}
-                    >
-                      <Image 
-                        source={{ uri: place.photos?.[0] || 'https://via.placeholder.com/300x200' }} 
-                        style={styles.placeImage} 
-                      />
-                      
-                      {/* Sentiment Badge */}
-                      {place.socialSignals && place.socialSignals.length > 0 && (
-                        <View style={styles.sentimentBadge}>
-                          <Ionicons 
-                            name={place.socialSignals[0].sentiment === 'positive' ? 'trending-up' : 'analytics'} 
-                            size={12} 
-                            color="#FFF" 
-                          />
-                        </View>
-                      )}
-
-                      <View style={styles.placeInfo}>
-                        <Text style={styles.placeName} numberOfLines={1}>{place.name}</Text>
-                        <View style={styles.scoreRow}>
-                          <Text style={styles.matchScore}>{place.matchScore}% Match</Text>
-                          {place.priceLevel && (
-                             <Text style={styles.priceLevel}>{'• ' + '$'.repeat(place.priceLevel)}</Text>
-                          )}
-                        </View>
-                        
-                        {/* Social Signal Snippet */}
-                        {place.socialSignals && place.socialSignals.length > 0 && (
-                          <View style={styles.socialSnippet}>
-                            <Text style={styles.socialText} numberOfLines={2}>
-                              "{place.socialSignals[0].quote}"
-                            </Text>
-                          </View>
-                        )}
-                      </View>
-                    </TouchableOpacity>
-                ))}
-              </ScrollView>
-            )}
-          </View>
-        ))}
-
-        {isTyping && (
-          <View style={styles.typingContainer}>
-            <ActivityIndicator color={Colors.brandViolet} size="small" />
-            <Text style={styles.typingText}>Mapai is thinking...</Text>
-          </View>
-        )}
-      </ScrollView>
-
-      {/* Modern Input Bar */}
-      <View style={styles.inputContainer}>
-        <View style={styles.inputPill}>
-          <TextInput
-            style={styles.input}
-            placeholder="Search or ask..."
-            placeholderTextColor={Colors.textTertiary}
-            value={inputText}
-            onChangeText={setInputText}
-            onSubmitEditing={() => handleSend()}
-          />
-          <TouchableOpacity 
-            style={[styles.sendButton, !inputText.trim() && styles.sendButtonDisabled]}
-            disabled={!inputText.trim()}
-            onPress={() => handleSend()}
-          >
-            <Ionicons 
-              name="arrow-up" 
-              size={20} 
-              color={inputText.trim() ? '#FFF' : Colors.textTertiary} 
-            />
-          </TouchableOpacity>
-        </View>
-      </View>
-    </KeyboardAvoidingView>
+      />
+    </View>
   );
 }
 
@@ -210,182 +84,99 @@ const styles = StyleSheet.create({
   },
   header: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'baseline',
     justifyContent: 'space-between',
     paddingTop: Platform.OS === 'ios' ? 60 : 40,
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
     paddingBottom: 16,
-    backgroundColor: Colors.background,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.05)',
-  },
-  headerTitleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: 24,
     fontWeight: '800',
     color: Colors.textPrimary,
     letterSpacing: -0.5,
   },
-  statusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: Colors.accentNeon,
-  },
-  historyButton: {
-    padding: 8,
-  },
-  backButton: {
-    padding: 8,
-  },
-  chatList: {
-    flex: 1,
-  },
-  chatContent: {
-    paddingVertical: 20,
-  },
-  emptyContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 100,
-    paddingHorizontal: 40,
-  },
-  sparkleIcon: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: Colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 20,
-  },
-  emptyText: {
-    fontSize: 18,
-    textAlign: 'center',
+  headerCount: {
+    fontSize: 14,
     color: Colors.textSecondary,
-    lineHeight: 26,
-    fontWeight: '600',
+    fontWeight: '500',
   },
-  placesContainer: {
-    marginVertical: 10,
-    paddingLeft: 16,
+  emptyState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 40,
+    paddingBottom: 80,
   },
-  placesContent: {
-    paddingRight: 32,
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+    marginTop: 20,
+    marginBottom: 8,
+  },
+  emptySubtitle: {
+    fontSize: 14,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  listContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 100,
     gap: 12,
   },
-  placeCard: {
-    width: 200,
-    backgroundColor: Colors.surface,
+  card: {
+    backgroundColor: '#FFFFFF',
     borderRadius: 16,
-    overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
-    ...Shadows.md,
+    borderColor: Colors.surfaceBorder,
+    padding: 16,
+    ...Shadows.sm,
   },
-  placeImage: {
-    width: '100%',
-    height: 100,
-    backgroundColor: Colors.surfaceElevated,
-  },
-  sentimentBadge: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: 'rgba(139, 92, 246, 0.8)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-  },
-  placeInfo: {
-    padding: 12,
-  },
-  placeName: {
-    color: Colors.textPrimary,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  scoreRow: {
+  cardBody: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    marginTop: 2,
   },
-  matchScore: {
-    color: Colors.brandViolet,
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  priceLevel: {
-    color: Colors.textTertiary,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  socialSnippet: {
-    marginTop: 8,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.05)',
-  },
-  socialText: {
-    color: Colors.textSecondary,
-    fontSize: 11,
-    lineHeight: 16,
-    fontStyle: 'italic',
-  },
-  typingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 20,
-    marginTop: 10,
-  },
-  typingText: {
-    color: Colors.textTertiary,
-    fontSize: 12,
-    fontStyle: 'italic',
-  },
-  inputContainer: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    paddingBottom: Platform.OS === 'ios' ? 34 : 16,
-    backgroundColor: Colors.background,
-  },
-  inputPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.surface,
-    paddingLeft: 20,
-    paddingRight: 6,
-    paddingVertical: 6,
-    borderRadius: 30,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
-  input: {
+  cardInfo: {
     flex: 1,
+    marginRight: 12,
+  },
+  cardName: {
+    fontSize: 15,
+    fontWeight: '700',
     color: Colors.textPrimary,
-    fontSize: 16,
-    height: 40,
+    marginBottom: 2,
   },
-  sendButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: Colors.brandViolet,
-    alignItems: 'center',
+  cardAddress: {
+    fontSize: 12,
+    color: Colors.textTertiary,
+    marginBottom: 6,
+  },
+  cardReason: {
+    fontSize: 12,
+    color: Colors.brandViolet,
+    fontStyle: 'italic',
+    lineHeight: 16,
+  },
+  scoreRing: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    borderWidth: 2,
+    borderColor: Colors.brandBlue,
+    alignItems: 'baseline' as any,
     justifyContent: 'center',
+    flexDirection: 'row',
   },
-  sendButtonDisabled: {
-    backgroundColor: 'transparent',
+  scoreText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: Colors.brandBlue,
+  },
+  scorePercent: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: Colors.textSecondary,
   },
 });
