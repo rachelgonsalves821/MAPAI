@@ -1,0 +1,55 @@
+{
+  "expo": {
+    "name": "Mapai",
+    "slug": "mapai",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "mapai",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#0F0F14"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "app.mapai.mobile",
+      "config": {
+        "googleMapsApiKey": "${EXPO_PUBLIC_GOOGLE_PLACES_API_KEY}"
+      },
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Mapai uses your location to find great places near you.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Mapai uses your location to surface arrival surveys when you visit a place.",
+        "NSCameraUsageDescription": "Mapai uses the camera to scan QR codes when adding friends."
+      }
+    },
+    "android": {
+      "package": "app.mapai.mobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#0F0F14"
+      },
+      "config": {
+        "googleMaps": {
+          "apiKey": "${EXPO_PUBLIC_GOOGLE_PLACES_API_KEY}"
+        }
+      },
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "CAMERA"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      "expo-web-browser"
+    ],
+    "experiments": {
+      "typedRoutes": false
+    }
+  }
+}
