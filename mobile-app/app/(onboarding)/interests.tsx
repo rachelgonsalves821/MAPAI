@@ -79,7 +79,7 @@ export default function InterestsScreen() {
           onPress={() => {
             if (selectedInterests.length >= 3) {
               router.push({
-                pathname: '/(onboarding)/profile',
+                pathname: '/(onboarding)/preferences',
                 params: { interests: selectedInterests.join(',') },
               });
             }

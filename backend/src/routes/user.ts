@@ -9,6 +9,7 @@ import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth.js';
 import { envelope, errorResponse } from '../utils/response.js';
 import { UserService } from '../services/user-service.js';
+import { getOrCreateUser, getPublicProfile } from '../services/identity-service.js';
 
 const onboardingSchema = z.object({
     display_name: z.string().min(1),
@@ -75,6 +76,44 @@ export async function userRoutes(app: FastifyInstance) {
             }
 
             return envelope(profile);
+        },
+    });
+
+    /**
+     * GET /v1/user/public/:username
+     * Public profile — no auth required.
+     */
+    app.get<{ Params: { username: string } }>('/public/:username', {
+        handler: async (request, reply) => {
+            const { username } = request.params;
+
+            const profile = await getPublicProfile(username);
+            if (!profile) {
+                return reply.status(404).send(
+                    errorResponse(404, 'User not found', 'NotFoundError')
+                );
+            }
+
+            return envelope(profile);
+        },
+    });
+
+    /**
+     * POST /v1/user/ensure
+     * Get or create user record from auth session.
+     * Called on app load to ensure user row exists.
+     */
+    app.post('/ensure', {
+        preHandler: authMiddleware,
+        handler: async (request) => {
+            const authUser = request.user!;
+            const user = await getOrCreateUser({
+                id: authUser.id,
+                email: authUser.email,
+                user_metadata: (request.body as any)?.user_metadata || {},
+            });
+
+            return envelope(user);
         },
     });
 }

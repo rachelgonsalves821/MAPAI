@@ -9,6 +9,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { AuthProvider } from '@/context/AuthContext';
+import { useOnboardingStore } from '@/store/onboardingStore';
 
 export { ErrorBoundary } from 'expo-router';
 
@@ -20,6 +21,8 @@ SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   useEffect(() => {
+    // Load persisted onboarding/preferences state
+    useOnboardingStore.getState().loadFromStorage();
     SplashScreen.hideAsync();
   }, []);
 
@@ -49,6 +52,12 @@ export default function RootLayout() {
           options={{
             animation: 'slide_from_bottom',
             presentation: 'modal',
+          }}
+        />
+        <Stack.Screen
+          name="u/[username]"
+          options={{
+            animation: 'slide_from_right',
           }}
         />
       </Stack>

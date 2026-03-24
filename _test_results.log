@@ -1,0 +1,23 @@
+# Mapai Overnight Test Results
+# Session: 2026-03-23
+
+# Tests will be appended as phases complete.
+
+# Test Run: 2026-03-24T00:31:00.382Z
+# Tests: 13
+# Pass: 13
+# Fail: 0
+
+[2026-03-24T00:31:00.378Z] Auth store module: PASS — authStore.ts exists with correct exports
+[2026-03-24T00:31:00.379Z] Onboarding store: PASS — onboardingStore.ts exists with correct exports
+[2026-03-24T00:31:00.379Z] Preferences screen: PASS — preferences.tsx has price, ambiance, speed sections
+[2026-03-24T00:31:00.379Z] Onboarding flow: PASS — interests → preferences → profile flow connected
+[2026-03-24T00:31:00.380Z] Username generator: PASS — username-service.ts with uniqueness check
+[2026-03-24T00:31:00.380Z] Identity service: PASS — getOrCreateUser + getPublicProfile implemented
+[2026-03-24T00:31:00.381Z] Public profile route: PASS — /u/[username] screen with backend fetch
+[2026-03-24T00:31:00.381Z] Social API scaffold: PASS — friends + request endpoints exist
+[2026-03-24T00:31:00.381Z] LLM context injection: PASS — buildUserContext exports user_profile shape
+[2026-03-24T00:31:00.381Z] Chat personalization: PASS — chat.tsx sends user_context with messages
+[2026-03-24T00:31:00.381Z] Database migration: PASS — v2 migration has username, friend_requests, friendships
+[2026-03-24T00:31:00.381Z] Social routes registration: PASS — socialRoutes registered at /v1/social
+[2026-03-24T00:31:00.382Z] Preference persistence: PASS — savePreferences writes to backend + stores

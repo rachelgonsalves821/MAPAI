@@ -15,6 +15,7 @@ import { memoryRoutes } from './routes/memory.js';
 import { navigationRoutes } from './routes/navigation.js';
 import { healthRoutes } from './routes/health.js';
 import { userRoutes } from './routes/user.js';
+import { socialRoutes } from './routes/social.js';
 
 async function main() {
     // Validate config
@@ -64,6 +65,7 @@ async function main() {
     await app.register(memoryRoutes, { prefix: '/v1/user' });
     await app.register(userRoutes, { prefix: '/v1/user' });
     await app.register(navigationRoutes, { prefix: '/v1/navigation' });
+    await app.register(socialRoutes, { prefix: '/v1/social' });
 
     // Global error handler
     app.setErrorHandler((error: any, _request, reply) => {
