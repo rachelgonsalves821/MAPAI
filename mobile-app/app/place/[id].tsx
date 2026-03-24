@@ -379,7 +379,7 @@ const styles = StyleSheet.create({
         width: 36,
         height: 4,
         borderRadius: 2,
-        backgroundColor: Colors.surfaceBorder,
+        backgroundColor: '#E5E7EB',
     },
 
     scrollView: {
