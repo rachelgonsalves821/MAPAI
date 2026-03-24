@@ -12,22 +12,23 @@ const apiClient: AxiosInstance = axios.create({
   },
 });
 
-export const setAuthToken = async (token: string) => {
-  await AsyncStorage.setItem('auth_token', token);
-};
-
-// Request Interceptor: prefer Supabase session token (auto-refreshed), fallback to stored token
+// Request Interceptor: prefer live Supabase session token (auto-refreshed), fallback to stored token
 apiClient.interceptors.request.use(
   async (config: InternalAxiosRequestConfig) => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.access_token) {
-        config.headers.Authorization = `Bearer ${session.access_token}`;
-      } else {
-        const token = await AsyncStorage.getItem('auth_token');
-        if (token) {
-          config.headers.Authorization = `Bearer ${token}`;
+      // Try Supabase session first — always fresh thanks to autoRefreshToken
+      if (supabase) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          config.headers.Authorization = `Bearer ${session.access_token}`;
+          return config;
         }
+      }
+
+      // Fallback: stored token (dev mode / guest)
+      const token = await AsyncStorage.getItem('auth_token');
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
       }
     } catch (error) {
       console.error('Error retrieving auth token:', error);
