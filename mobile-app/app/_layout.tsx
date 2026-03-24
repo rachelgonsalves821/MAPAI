@@ -10,6 +10,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { AuthProvider } from '@/context/AuthContext';
 import { useOnboardingStore } from '@/store/onboardingStore';
+import { LocationService } from '@/services/LocationService';
 
 export { ErrorBoundary } from 'expo-router';
 
@@ -21,8 +22,8 @@ SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   useEffect(() => {
-    // Load persisted onboarding/preferences state
     useOnboardingStore.getState().loadFromStorage();
+    LocationService.init();
     SplashScreen.hideAsync();
   }, []);
 
@@ -55,7 +56,20 @@ export default function RootLayout() {
           }}
         />
         <Stack.Screen
+          name="transport/[placeId]"
+          options={{
+            animation: 'slide_from_bottom',
+            presentation: 'modal',
+          }}
+        />
+        <Stack.Screen
           name="u/[username]"
+          options={{
+            animation: 'slide_from_right',
+          }}
+        />
+        <Stack.Screen
+          name="settings"
           options={{
             animation: 'slide_from_right',
           }}

@@ -18,17 +18,23 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Shadows } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
-import { useAuthStore } from '@/store/authStore';
+import { useAuthStore, UserPreferencesState } from '@/store/authStore';
 import { useOnboardingStore } from '@/store/onboardingStore';
+
+const DEFAULT_PREFS: UserPreferencesState = {
+  categories: [],
+  priceRange: [],
+  ambiance: [],
+  serviceSpeed: '',
+  dietaryRestrictions: [],
+};
 
 export default function ProfileScreen() {
   const router = useRouter();
   const { user, signOut } = useAuth();
   const authStoreUser = useAuthStore((s) => s.user);
-  const onboardingPrefs = useOnboardingStore((s) => s.preferences);
 
-  // Merge preferences: authStore > onboardingStore
-  const prefs = authStoreUser?.preferences || onboardingPrefs;
+  const prefs = authStoreUser?.preferences || DEFAULT_PREFS;
   const username = authStoreUser?.username;
 
   const handleShare = async () => {

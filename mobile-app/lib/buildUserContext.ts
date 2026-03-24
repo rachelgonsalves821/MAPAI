@@ -4,8 +4,7 @@
  * This gets sent alongside every chat message to personalize AI responses.
  */
 
-import { useAuthStore } from '@/store/authStore';
-import { useOnboardingStore } from '@/store/onboardingStore';
+import { useAuthStore, UserPreferencesState } from '@/store/authStore';
 
 export interface UserLLMContext {
   user_profile: {
@@ -27,11 +26,15 @@ export interface UserLLMContext {
  * Call this before sending chat messages to include personalization.
  */
 export function buildUserContext(): UserLLMContext {
-  // Try authStore first, fall back to onboardingStore
   const authUser = useAuthStore.getState().user;
-  const onboardingPrefs = useOnboardingStore.getState().preferences;
 
-  const prefs = authUser?.preferences || onboardingPrefs;
+  const prefs: UserPreferencesState = authUser?.preferences || {
+    categories: [],
+    priceRange: [],
+    ambiance: [],
+    serviceSpeed: '',
+    dietaryRestrictions: [],
+  };
 
   return {
     user_profile: {

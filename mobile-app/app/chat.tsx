@@ -22,6 +22,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Shadows } from '@/constants/theme';
 import { useMapStore } from '@/store/mapStore';
+import { useLocationStore } from '@/store/locationStore';
 import { buildUserContext } from '@/lib/buildUserContext';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:3001';
@@ -130,40 +131,55 @@ export default function ChatScreen() {
       scrollToBottom();
 
       try {
+        console.log('CHAT REQUEST:', { message: text, sessionId, apiUrl: `${BACKEND_URL}/v1/chat/message` });
+
         const res = await fetch(`${BACKEND_URL}/v1/chat/message`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             message: text,
             session_id: sessionId,
-            location: { lat: 42.3601, lng: -71.0589 },
-            user_context: buildUserContext(),
+            location: {
+              lat: useLocationStore.getState().coords.latitude,
+              lng: useLocationStore.getState().coords.longitude,
+            },
           }),
         });
 
-        if (!res.ok) throw new Error(`Server returned ${res.status}`);
+        if (!res.ok) {
+          const errBody = await res.text();
+          console.error('CHAT RESPONSE ERROR:', res.status, errBody);
+          throw new Error(`Server returned ${res.status}: ${errBody}`);
+        }
 
         const json = await res.json();
+        console.log('CHAT RESPONSE:', JSON.stringify(json).slice(0, 500));
         const data = json.data ?? json;
         const responseType: ResponseType = data.type || 'recommendation';
         const places =
-          responseType === 'recommendation' && Array.isArray(data.places)
-            ? data.places.slice(0, 5)
-            : [];
+          Array.isArray(data.places) ? data.places.slice(0, 5) : [];
+
+        console.log('PLACES RECEIVED:', places.length, places.map((p: any) => p.name));
 
         if (places.length > 0) {
-          setDiscoveryPlaces(
-            places
-              .filter((p: PlaceResult) => p.location?.latitude && p.location?.longitude)
-              .map((p: PlaceResult) => ({
-                ...p,
-                location: {
-                  latitude: p.location!.latitude,
-                  longitude: p.location!.longitude,
-                },
-                matchScore: p.matchScore ?? 0,
-              })),
-          );
+          const mappedPlaces = places
+            .filter((p: any) => p.location?.latitude && p.location?.longitude)
+            .map((p: any) => ({
+              ...p,
+              location: {
+                latitude: p.location.latitude,
+                longitude: p.location.longitude,
+              },
+              matchScore: p.matchScore ?? 50,
+              matchReasons: p.matchReasons || [],
+              socialSignals: p.socialSignals || [],
+              isLoyalty: false,
+              visitCount: 0,
+            }));
+          console.log('MAP MARKERS:', mappedPlaces.length, mappedPlaces.map((p: any) => ({ name: p.name, lat: p.location.latitude, lng: p.location.longitude })));
+          if (mappedPlaces.length > 0) {
+            setDiscoveryPlaces(mappedPlaces);
+          }
         }
 
         setMessages((prev) => [
@@ -176,9 +192,10 @@ export default function ChatScreen() {
           },
         ]);
       } catch (err: any) {
+        console.error('CHAT ERROR:', err);
         const isNet =
           err.message?.includes('Network request failed') ||
-          err.message?.includes('fetch');
+          err.message?.includes('fetch failed');
         setMessages((prev) => [
           ...prev,
           {

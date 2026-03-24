@@ -1,74 +1,76 @@
 /**
  * Mapai — Onboarding Store (Zustand)
- * Tracks onboarding progress and preference selections.
- * Persists to AsyncStorage so onboarding state survives app restarts.
+ * Tracks onboarding progress for the identity + social flow.
+ * Persists to AsyncStorage so state survives app restarts.
  */
 
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-export interface OnboardingPreferences {
-  categories: string[];
-  priceRange: string[];
-  ambiance: string[];
-  serviceSpeed: string;
-  dietaryRestrictions: string[];
-}
-
 interface OnboardingState {
-  step: number;
-  isComplete: boolean;
-  preferences: OnboardingPreferences;
+  currentStep: number;
+  displayName: string;
+  username: string;
+  selectedFriends: string[];
+  onboardingComplete: boolean;
 
   setStep: (step: number) => void;
-  next: () => void;
-  setPreferences: (prefs: Partial<OnboardingPreferences>) => void;
+  setDisplayName: (name: string) => void;
+  setUsername: (username: string) => void;
+  addFriend: (friendId: string) => void;
+  removeFriend: (friendId: string) => void;
   complete: () => void;
   reset: () => void;
   loadFromStorage: () => Promise<void>;
 }
 
-const DEFAULT_PREFERENCES: OnboardingPreferences = {
-  categories: [],
-  priceRange: [],
-  ambiance: [],
-  serviceSpeed: '',
-  dietaryRestrictions: [],
-};
-
 const STORAGE_KEY = 'mapai_onboarding';
 
 export const useOnboardingStore = create<OnboardingState>((set, get) => ({
-  step: 1,
-  isComplete: false,
-  preferences: { ...DEFAULT_PREFERENCES },
+  currentStep: 1,
+  displayName: '',
+  username: '',
+  selectedFriends: [],
+  onboardingComplete: false,
 
-  setStep: (step) => set({ step }),
+  setStep: (step) => {
+    set({ currentStep: step });
+    persist(get());
+  },
 
-  next: () => set((s) => ({ step: s.step + 1 })),
+  setDisplayName: (displayName) => {
+    set({ displayName });
+    persist(get());
+  },
 
-  setPreferences: (prefs) =>
-    set((state) => {
-      const updated = { ...state.preferences, ...prefs };
-      // Persist asynchronously
-      AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({ preferences: updated, isComplete: state.isComplete })
-      ).catch(() => {});
-      return { preferences: updated };
-    }),
+  setUsername: (username) => {
+    set({ username });
+    persist(get());
+  },
+
+  addFriend: (friendId) => {
+    set((s) => ({ selectedFriends: [...s.selectedFriends, friendId] }));
+    persist(get());
+  },
+
+  removeFriend: (friendId) => {
+    set((s) => ({ selectedFriends: s.selectedFriends.filter((id) => id !== friendId) }));
+    persist(get());
+  },
 
   complete: () => {
-    set({ isComplete: true });
-    const state = get();
-    AsyncStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ preferences: state.preferences, isComplete: true })
-    ).catch(() => {});
+    set({ onboardingComplete: true });
+    persist({ ...get(), onboardingComplete: true });
   },
 
   reset: () => {
-    set({ step: 1, isComplete: false, preferences: { ...DEFAULT_PREFERENCES } });
+    set({
+      currentStep: 1,
+      displayName: '',
+      username: '',
+      selectedFriends: [],
+      onboardingComplete: false,
+    });
     AsyncStorage.removeItem(STORAGE_KEY).catch(() => {});
   },
 
@@ -78,8 +80,11 @@ export const useOnboardingStore = create<OnboardingState>((set, get) => ({
       if (stored) {
         const parsed = JSON.parse(stored);
         set({
-          preferences: { ...DEFAULT_PREFERENCES, ...parsed.preferences },
-          isComplete: parsed.isComplete || false,
+          currentStep: parsed.currentStep ?? 1,
+          displayName: parsed.displayName ?? '',
+          username: parsed.username ?? '',
+          selectedFriends: parsed.selectedFriends ?? [],
+          onboardingComplete: parsed.onboardingComplete ?? false,
         });
       }
     } catch {
@@ -87,3 +92,11 @@ export const useOnboardingStore = create<OnboardingState>((set, get) => ({
     }
   },
 }));
+
+function persist(state: OnboardingState) {
+  const { currentStep, displayName, username, selectedFriends, onboardingComplete } = state;
+  AsyncStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({ currentStep, displayName, username, selectedFriends, onboardingComplete })
+  ).catch(() => {});
+}

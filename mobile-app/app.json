@@ -14,12 +14,56 @@
       "supportsTablet": false,
       "bundleIdentifier": "app.mapai.mobile",
       "config": {
-        "googleMapsApiKey": "${EXPO_PUBLIC_GOOGLE_PLACES_API_KEY}"
+        "googleMapsApiKey": "${EXPO_PUBLIC_GOOGLE_MAPS_SDK_KEY}"
       },
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Mapai uses your location to find great places near you.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "Mapai uses your location to surface arrival surveys when you visit a place.",
-        "NSCameraUsageDescription": "Mapai uses the camera to scan QR codes when adding friends."
+        "NSLocationWhenInUseUsageDescription": "Mapai uses your location to show nearby places ranked for you and to get directions to your destination.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Mapai uses your location in the background only to detect when you arrive at a saved destination, so we can send you a quick check-in prompt. You can disable this in Settings at any time.",
+        "NSMicrophoneUsageDescription": "Mapai uses your microphone for voice search so you can find places hands-free.",
+        "NSContactsUsageDescription": "Mapai can optionally sync your contacts to help you find and add friends. No contact data is stored on our servers.",
+        "NSCameraUsageDescription": "Mapai uses your camera to scan QR codes when checking in at partner locations.",
+        "NSUserTrackingUsageDescription": "Mapai uses this to personalize your experience and measure how our features are working for you."
+      },
+      "privacyManifests": {
+        "NSPrivacyAccessedAPITypes": [
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryUserDefaults",
+            "NSPrivacyAccessedAPITypeReasons": ["CA92.1"]
+          },
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
+            "NSPrivacyAccessedAPITypeReasons": ["C617.1"]
+          },
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryDiskSpace",
+            "NSPrivacyAccessedAPITypeReasons": ["E174.1"]
+          },
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategorySystemBootTime",
+            "NSPrivacyAccessedAPITypeReasons": ["35F9.1"]
+          }
+        ],
+        "NSPrivacyCollectedDataTypes": [
+          {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypePreciseLocation",
+            "NSPrivacyCollectedDataTypeLinked": true,
+            "NSPrivacyCollectedDataTypeTracking": false,
+            "NSPrivacyCollectedDataTypePurposes": ["NSPrivacyCollectedDataTypePurposeAppFunctionality"]
+          },
+          {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeProductInteraction",
+            "NSPrivacyCollectedDataTypeLinked": true,
+            "NSPrivacyCollectedDataTypeTracking": false,
+            "NSPrivacyCollectedDataTypePurposes": ["NSPrivacyCollectedDataTypePurposeAnalytics"]
+          },
+          {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeDeviceID",
+            "NSPrivacyCollectedDataTypeLinked": false,
+            "NSPrivacyCollectedDataTypeTracking": false,
+            "NSPrivacyCollectedDataTypePurposes": ["NSPrivacyCollectedDataTypePurposeAnalytics"]
+          }
+        ],
+        "NSPrivacyTracking": false
       }
     },
     "android": {
@@ -29,7 +73,7 @@
       },
       "config": {
         "googleMaps": {
-          "apiKey": "${EXPO_PUBLIC_GOOGLE_PLACES_API_KEY}"
+          "apiKey": "${EXPO_PUBLIC_GOOGLE_MAPS_SDK_KEY}"
         }
       },
       "permissions": [
@@ -45,7 +89,16 @@
     },
     "plugins": [
       "expo-router",
-      "expo-font"
+      "expo-font",
+      "expo-tracking-transparency",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Mapai uses your location in the background only to detect when you arrive at a saved destination, so we can send you a quick check-in prompt. You can disable this in Settings at any time.",
+          "locationWhenInUsePermission": "Mapai uses your location to show nearby places ranked for you and to get directions to your destination.",
+          "isIosBackgroundLocationEnabled": true
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": false

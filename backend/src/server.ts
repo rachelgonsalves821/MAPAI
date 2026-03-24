@@ -37,7 +37,7 @@ async function main() {
 
     // Plugins
     await app.register(cors, {
-        origin: config.corsOrigin,
+        origin: config.corsOrigins,
         methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     });
 

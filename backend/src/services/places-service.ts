@@ -7,6 +7,7 @@
 import { config } from '../config.js';
 import { getSupabase } from '../db/supabase-client.js';
 import { UserMemoryContext } from './ai-orchestrator.js';
+import { haversineKm, walkingMinutes, distanceLabel, proximityScore } from '../utils/distance.js';
 
 const PLACES_BASE = 'https://places.googleapis.com/v1/places';
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
@@ -38,7 +39,7 @@ export class PlacesService {
         const cacheKey = `search:${input.query}:${input.location.latitude.toFixed(3)}`;
         const cached = placeCache.get(cacheKey);
         if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
-            return this.reRank(cached.data, input.userMemory);
+            return this.reRank(cached.data, input.userMemory, input.location);
         }
 
         try {
@@ -74,7 +75,7 @@ export class PlacesService {
             const places = (data.places || []).map((p: any) => this.mapGooglePlace(p));
 
             placeCache.set(cacheKey, { data: places, ts: Date.now() });
-            return this.reRank(places, input.userMemory);
+            return this.reRank(places, input.userMemory, input.location);
         } catch (err) {
             console.error('Places search error:', err);
             return [];
@@ -88,7 +89,7 @@ export class PlacesService {
         const cacheKey = `nearby:${input.location.latitude.toFixed(3)}:${input.radius}:${input.category || ''}`;
         const cached = placeCache.get(cacheKey);
         if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
-            return this.reRank(cached.data, input.userMemory).slice(0, input.maxResults);
+            return this.reRank(cached.data, input.userMemory, input.location).slice(0, input.maxResults);
         }
 
         try {
@@ -128,7 +129,7 @@ export class PlacesService {
             const places = (data.places || []).map((p: any) => this.mapGooglePlace(p));
 
             placeCache.set(cacheKey, { data: places, ts: Date.now() });
-            return this.reRank(places, input.userMemory).slice(0, input.maxResults);
+            return this.reRank(places, input.userMemory, input.location).slice(0, input.maxResults);
         } catch (err) {
             console.error('Nearby search error:', err);
             return [];
@@ -212,24 +213,50 @@ export class PlacesService {
     }
 
     /**
-     * Re-rank places based on user preferences.
-     * Deterministic heuristic scoring (fast, no LLM call).
+     * Annotate places with distance from user location.
      */
-    private reRank(places: any[], memory: UserMemoryContext): any[] {
-        return places
+    private annotateDistance(places: any[], userLat: number, userLng: number): any[] {
+        return places.map((place) => {
+            const lat = place.location?.latitude ?? 0;
+            const lng = place.location?.longitude ?? 0;
+            const distKm = haversineKm(userLat, userLng, lat, lng);
+            return {
+                ...place,
+                distanceKm: Math.round(distKm * 100) / 100,
+                walkingMinutes: Math.round(walkingMinutes(distKm)),
+                distanceLabel: distanceLabel(distKm),
+            };
+        });
+    }
+
+    /**
+     * Re-rank places based on user preferences + proximity.
+     * userLocation is optional — if absent, proximity scoring is skipped.
+     */
+    private reRank(
+        places: any[],
+        memory: UserMemoryContext,
+        userLocation?: { latitude: number; longitude: number }
+    ): any[] {
+        let annotated = places;
+        if (userLocation) {
+            annotated = this.annotateDistance(places, userLocation.latitude, userLocation.longitude);
+        }
+        return annotated
             .map((place) => ({
                 ...place,
-                ...this.scorePlace(place, memory),
+                ...this.scorePlace(place, memory, userLocation),
             }))
             .sort((a, b) => b.matchScore - a.matchScore);
     }
 
     /**
-     * Score a single place against user preferences.
+     * Score a single place against user preferences + proximity.
      */
     private scorePlace(
         place: any,
-        memory: UserMemoryContext
+        memory: UserMemoryContext,
+        userLocation?: { latitude: number; longitude: number }
     ): { matchScore: number; matchReasons: string[] } {
         let score = 50;
         const reasons: string[] = [];
@@ -265,6 +292,18 @@ export class PlacesService {
 
         // Open now
         if (place.openNow) score += 5;
+
+        // Proximity scoring (20% weight)
+        if (userLocation && place.distanceKm != null) {
+            const proxScore = proximityScore(place.distanceKm);
+            // Blend: 80% preference + 20% proximity
+            score = Math.round(score * 0.8 + proxScore * 100 * 0.2);
+            if (place.walkingMinutes <= 10) {
+                reasons.push(`${place.walkingMinutes} min walk`);
+            } else if (place.walkingMinutes <= 20) {
+                reasons.push(`${place.walkingMinutes} min walk`);
+            }
+        }
 
         score = Math.max(0, Math.min(100, score));
         return {

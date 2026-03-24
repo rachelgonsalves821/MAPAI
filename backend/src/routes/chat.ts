@@ -11,6 +11,7 @@ import { envelope, errorResponse } from '../utils/response.js';
 import { AiOrchestrator } from '../services/ai-orchestrator.js';
 import { PlacesService } from '../services/places-service.js';
 import { MemoryService } from '../services/memory-service.js';
+import { config } from '../config.js';
 
 // Request validation
 const chatMessageSchema = z.object({
@@ -54,6 +55,7 @@ export async function chatRoutes(app: FastifyInstance) {
 
             try {
                 const t0 = Date.now();
+                console.log(`[Chat] INCOMING: "${message}" from user ${userId}`);
 
                 // 1. Load user memory/preferences
                 const userMemory = await memory.getUserContext(userId);
@@ -77,15 +79,19 @@ export async function chatRoutes(app: FastifyInstance) {
                 // 3. If AI detected a discovery intent, fetch real places
                 let placeResults: any[] = [];
                 if (aiResponse.searchQuery) {
-                    const searchLocation = location || { lat: 42.3601, lng: -71.0589 }; // default: Boston
-                    placeResults = await places.search({
-                        query: aiResponse.searchQuery,
-                        location: { latitude: searchLocation.lat, longitude: searchLocation.lng },
-                        userId,
-                        userMemory,
-                    });
-                    const tPlaces = Date.now();
-                    console.log(`[Chat] Places search returned ${placeResults.length} results in ${tPlaces - tAi}ms`);
+                    if (!config.google.placesApiKey) {
+                        console.warn('[Chat] GOOGLE_PLACES_API_KEY not set — skipping places search');
+                    } else {
+                        const searchLocation = location || { lat: 42.3601, lng: -71.0589 }; // default: Boston
+                        placeResults = await places.search({
+                            query: aiResponse.searchQuery,
+                            location: { latitude: searchLocation.lat, longitude: searchLocation.lng },
+                            userId,
+                            userMemory,
+                        });
+                        const tPlaces = Date.now();
+                        console.log(`[Chat] Places search returned ${placeResults.length} results in ${tPlaces - tAi}ms`);
+                    }
                 }
 
                 // 4. Extract preference insights from conversation and save
@@ -99,7 +105,7 @@ export async function chatRoutes(app: FastifyInstance) {
                     : aiResponse.text
                         ? 'conversational'
                         : 'error';
-                console.log(`[Chat] Total request time: ${totalMs}ms — type: ${responseType}`);
+                console.log(`[Chat] Total request time: ${totalMs}ms — type: ${responseType}, places: ${placeResults.length}`);
 
                 return envelope({
                     type: responseType,
@@ -109,9 +115,10 @@ export async function chatRoutes(app: FastifyInstance) {
                     session_id: aiResponse.sessionId,
                 });
             } catch (err: any) {
+                console.error('[Chat] CHAT ERROR:', err);
                 app.log.error(err, 'Chat error');
                 return reply.status(500).send(
-                    errorResponse(500, 'Failed to process chat message', 'ChatError')
+                    errorResponse(500, `Chat failed: ${err.message || 'Unknown error'}`, 'ChatError')
                 );
             }
         },

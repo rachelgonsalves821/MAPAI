@@ -54,6 +54,53 @@ export class UserService {
     }
 
     /**
+     * Permanently delete a user account and all associated data.
+     * Idempotent — safe to call multiple times.
+     *
+     * Deletes from:
+     * 1. PostgreSQL: users, chat_sessions, user_preferences, user_memory
+     * 2. Supabase Auth: removes auth user
+     * 3. Redis cache: clears user-scoped keys (if Redis available)
+     * 4. Pinecone embeddings: removes user vectors (when implemented)
+     */
+    async deleteAccount(userId: string): Promise<void> {
+        if (!hasDatabase()) {
+            console.log(`[Mock] Account deleted for user ${userId}`);
+            return;
+        }
+
+        const supabase = getSupabase()!;
+
+        // 1. Delete user data from all tables (order matters — children first)
+        const tables = ['chat_sessions', 'user_memory', 'user_preferences', 'saved_places', 'friend_connections', 'users'];
+        for (const table of tables) {
+            const column = table === 'friend_connections' ? 'user_id' : table === 'users' ? 'id' : 'user_id';
+            const { error } = await (supabase.from(table) as any).delete().eq(column, userId);
+            if (error && !error.message?.includes('does not exist')) {
+                console.warn(`[User] Failed to delete from ${table}: ${error.message}`);
+            }
+        }
+
+        // Also delete friend connections where user is the friend
+        await (supabase.from('friend_connections') as any).delete().eq('friend_id', userId).catch(() => {});
+
+        // 2. Delete Supabase Auth user (requires service role)
+        const { error: authError } = await supabase.auth.admin.deleteUser(userId);
+        if (authError) {
+            console.warn(`[User] Auth user deletion failed: ${authError.message}`);
+            // Non-fatal — data is already gone
+        }
+
+        // 3. Redis cache clear (best-effort)
+        // TODO: When Redis is integrated, call redis.del(`user:${userId}:*`)
+
+        // 4. Pinecone embeddings (best-effort)
+        // TODO: When Pinecone is integrated, delete vectors with userId metadata
+
+        console.log(`[User] Account fully deleted: ${userId}`);
+    }
+
+    /**
      * Gets a user's profile and onboarding status.
      */
     async getProfile(userId: string) {

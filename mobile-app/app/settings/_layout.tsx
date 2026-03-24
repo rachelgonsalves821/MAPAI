@@ -1,7 +1,7 @@
 import { Stack } from 'expo-router';
 import { Colors } from '@/constants/theme';
 
-export default function OnboardingLayout() {
+export default function SettingsLayout() {
   return (
     <Stack
       screenOptions={{
@@ -9,11 +9,6 @@ export default function OnboardingLayout() {
         contentStyle: { backgroundColor: Colors.background },
         animation: 'slide_from_right',
       }}
-    >
-      <Stack.Screen name="index" />
-      <Stack.Screen name="create-id" />
-      <Stack.Screen name="find-friends" />
-      <Stack.Screen name="complete" />
-    </Stack>
+    />
   );
 }

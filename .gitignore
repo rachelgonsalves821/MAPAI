@@ -1,10 +1,12 @@
 # Dependencies
 node_modules/
 
-# Environment files
+# Environment files (NEVER commit these — see SECRETS.md)
 .env
+.env.*
+!.env.example
 .env.local
-.env.production
+.env.*.local
 
 # Build output
 dist/

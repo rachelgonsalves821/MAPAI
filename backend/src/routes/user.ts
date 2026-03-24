@@ -99,6 +99,41 @@ export async function userRoutes(app: FastifyInstance) {
     });
 
     /**
+     * DELETE /v1/user/account
+     * Permanently delete user account and all associated data.
+     * Apple App Store requirement — must be accessible from Settings.
+     * Idempotent: calling twice is safe.
+     */
+    app.delete('/account', {
+        preHandler: authMiddleware,
+        handler: async (request, reply) => {
+            const userId = request.user!.id;
+
+            try {
+                // Log deletion event BEFORE deleting (needed for compliance reporting)
+                console.log(`[User] ACCOUNT_DELETION user=${userId} timestamp=${new Date().toISOString()}`);
+
+                // Delete all user data
+                await userService.deleteAccount(userId);
+
+                return envelope({
+                    deleted: true,
+                    deleted_at: new Date().toISOString(),
+                });
+            } catch (error: any) {
+                app.log.error(error, `Account deletion failed for user ${userId}`);
+                return reply.status(500).send(
+                    errorResponse(
+                        500,
+                        'Account deletion failed. Please contact support@mapai.app for assistance.',
+                        'DeletionError'
+                    )
+                );
+            }
+        },
+    });
+
+    /**
      * POST /v1/user/ensure
      * Get or create user record from auth session.
      * Called on app load to ensure user row exists.

@@ -1,58 +1,67 @@
-import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, Dimensions } from 'react-native';
+import React, { useState } from 'react';
+import { StyleSheet, View, Text, Dimensions } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
-import { Colors, Typography, Spacing, BorderRadius, MapConfig, Shadows } from '@/constants/theme';
-import { Ionicons } from '@expo/vector-icons';
+import { Colors, MapConfig, Shadows } from '@/constants/theme';
 import { LatLng, Place } from '../types';
-import { useUIStore } from '@/store/uiStore';
 
 interface ExploreViewProps {
   places: Place[];
   onPlaceSelect: (place: Place) => void;
   selectedPlace?: Place;
   routePoints?: LatLng[];
+  /** When true, map fills only its parent container instead of full screen */
+  compact?: boolean;
 }
 
 export default function ExploreView({
   places,
   onPlaceSelect,
   selectedPlace,
-  routePoints
+  routePoints,
+  compact,
 }: ExploreViewProps) {
   const [region, setRegion] = useState(MapConfig.initialRegion);
-  const { mapOpacity } = useUIStore();
 
   return (
     <View style={styles.container}>
-      <View style={{ flex: 1, opacity: mapOpacity }}>
       <MapView
         provider={PROVIDER_GOOGLE}
-        style={styles.map}
+        style={compact ? styles.mapCompact : styles.mapFull}
         initialRegion={region}
         customMapStyle={MapConfig.darkMapStyle}
         onRegionChangeComplete={setRegion}
         showsUserLocation
+        showsMyLocationButton={false}
       >
-        {places.map((place) => (
-          <Marker
-            key={place.id}
-            coordinate={place.location}
-            onPress={() => onPlaceSelect(place)}
-          >
-            <View style={[
-              styles.markerContainer,
-              selectedPlace?.id === place.id && styles.markerActive
-            ]}>
-              <View style={[
-                styles.markerCircle,
-                { backgroundColor: place.matchScore >= 70 ? Colors.matchHigh : place.matchScore >= 40 ? Colors.matchMedium : Colors.matchLow }
-              ]}>
-                <Text style={styles.markerText}>{place.matchScore}%</Text>
+        {places.map((place) => {
+          const isSelected = selectedPlace?.id === place.id;
+          const score = place.matchScore ?? 50;
+          const isHigh = score >= 70;
+          const isMed = score >= 40;
+
+          return (
+            <Marker
+              key={place.id}
+              coordinate={place.location}
+              onPress={() => onPlaceSelect(place)}
+            >
+              <View style={[styles.pin, isSelected && styles.pinSelected]}>
+                <View
+                  style={[
+                    styles.pinDot,
+                    {
+                      backgroundColor: isHigh
+                        ? Colors.brandBlue
+                        : isMed
+                        ? Colors.matchMedium
+                        : Colors.matchLow,
+                    },
+                  ]}
+                />
               </View>
-              <View style={styles.markerTail} />
-            </View>
-          </Marker>
-        ))}
+            </Marker>
+          );
+        })}
 
         {routePoints && (
           <Polyline
@@ -63,14 +72,6 @@ export default function ExploreView({
           />
         )}
       </MapView>
-      </View>
-
-      {/* Floating UI Elements */}
-      <View style={styles.floatingContainer}>
-        <TouchableOpacity style={styles.locationButton} activeOpacity={0.8}>
-          <Ionicons name="location" size={24} color={Colors.textPrimary} />
-        </TouchableOpacity>
-      </View>
     </View>
   );
 }
@@ -82,51 +83,31 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background,
   },
-  map: {
-    width: width,
-    height: height,
+  mapFull: {
+    width,
+    height,
   },
-  markerContainer: {
+  mapCompact: {
+    width: '100%',
+    height: '100%',
+  },
+  pin: {
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  markerActive: {
-    transform: [{ scale: 1.2 }],
-    zIndex: 10,
-  },
-  markerCircle: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: '#FFFFFF',
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.9)',
     ...Shadows.sm,
   },
-  markerText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  markerTail: {
-    width: 2,
-    height: 4,
-    backgroundColor: Colors.surfaceBorder,
-  },
-  floatingContainer: {
-    position: 'absolute',
-    right: 20,
-    bottom: 120, // Above tab bar
-    gap: 12,
-  },
-  locationButton: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+  pinSelected: {
+    transform: [{ scale: 1.3 }],
     backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: Colors.surfaceBorder,
     ...Shadows.md,
+  },
+  pinDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
   },
 });

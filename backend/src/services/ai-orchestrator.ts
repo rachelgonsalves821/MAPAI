@@ -1,12 +1,16 @@
 /**
  * Mapai Backend — AI Orchestrator Service
- * Handles prompt construction, Claude API calls, and response parsing.
+ * Handles prompt construction, LLM calls (Gemini or Claude), and response parsing.
  * PRD §6.3: System persona + user memory + situational context + user message.
+ *
+ * Provider selection: set LLM_PROVIDER=gemini|anthropic in .env
+ * Default: gemini (cheapest). Switch to anthropic for higher quality.
  *
  * Sessions persist to Supabase when available, in-memory fallback otherwise.
  */
 
 import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { config } from '../config.js';
 import { getSupabase, hasDatabase } from '../db/supabase-client.js';
 import { v4 as uuid } from 'uuid';
@@ -58,24 +62,61 @@ interface SessionMessage {
 const inMemorySessions = new Map<string, { messages: SessionMessage[] }>();
 
 export class AiOrchestrator {
-    private client: Anthropic;
+    private anthropicClient: Anthropic | null = null;
+    private geminiClient: GoogleGenerativeAI | null = null;
+    private provider: 'gemini' | 'anthropic';
 
     constructor() {
-        this.client = new Anthropic({ apiKey: config.anthropic.apiKey });
+        this.provider = config.llmProvider;
+
+        if (this.provider === 'anthropic' && config.anthropic.apiKey) {
+            this.anthropicClient = new Anthropic({ apiKey: config.anthropic.apiKey });
+            console.log(`[AI] Provider: Anthropic Claude (${config.anthropic.model})`);
+        } else if (this.provider === 'gemini' && config.gemini.apiKey) {
+            this.geminiClient = new GoogleGenerativeAI(config.gemini.apiKey);
+            console.log(`[AI] Provider: Google Gemini (${config.gemini.model})`);
+        } else if (config.gemini.apiKey) {
+            // Fallback: if requested provider has no key, try gemini
+            this.provider = 'gemini';
+            this.geminiClient = new GoogleGenerativeAI(config.gemini.apiKey);
+            console.log(`[AI] Provider fallback: Gemini (${config.gemini.model}) — ${config.llmProvider} key missing`);
+        } else if (config.anthropic.apiKey) {
+            // Fallback: try anthropic
+            this.provider = 'anthropic';
+            this.anthropicClient = new Anthropic({ apiKey: config.anthropic.apiKey });
+            console.log(`[AI] Provider fallback: Claude (${config.anthropic.model}) — gemini key missing`);
+        } else {
+            console.error('[AI] No LLM API keys configured! Set ANTHROPIC_API_KEY or GOOGLE_GEMINI_API_KEY');
+        }
     }
 
     async chat(input: ChatInput): Promise<ChatOutput> {
         const sessionId = input.sessionId || uuid();
 
+        console.log('\n=== PIPELINE TRACE ===');
+        console.log('Backend received request: YES');
+        console.log(`[AI] Provider: ${this.provider} | Message: "${input.message}"`);
+
+        // Guard: fail fast if no client
+        if (!this.anthropicClient && !this.geminiClient) {
+            console.error('[AI] No LLM client available');
+            console.log('LLM called: NO (no API key)');
+            console.log('=== END PIPELINE TRACE ===\n');
+            return {
+                text: '⚠️ No LLM configured. Set ANTHROPIC_API_KEY or GOOGLE_GEMINI_API_KEY in backend/.env',
+                preferenceInsights: [],
+                sessionId,
+            };
+        }
+
         // Load session history
         const messages = await this.loadSession(sessionId, input.userId);
 
-        // Build system prompt (PRD §6.3.2)
+        // Build system prompt
         const systemPrompt = this.buildSystemPrompt(input.userMemory, input.location, input.context);
 
         if (config.isDev) {
             console.log('[AI] System prompt length:', systemPrompt.length, 'chars');
-            console.log('[AI] System prompt:\n', systemPrompt);
         }
 
         // Add user message
@@ -86,30 +127,25 @@ export class AiOrchestrator {
         };
         messages.push(newMessage);
 
-        // Keep last 20 messages to stay within context window
+        // Keep last 20 messages
         const recentMessages = messages.slice(-20);
-        console.log(`[AI] Sending ${recentMessages.length} messages to Claude (model: ${config.anthropic.model})`);
+        console.log(`[AI] Sending ${recentMessages.length} messages (provider: ${this.provider})`);
+        console.log('LLM called: YES');
 
         try {
-            const response = await this.client.messages.create({
-                model: config.anthropic.model,
-                max_tokens: 1024,
-                system: systemPrompt,
-                messages: recentMessages.map((m) => ({
-                    role: m.role as 'user' | 'assistant',
-                    content: m.content,
-                })),
-            });
+            let rawText: string;
 
-            const rawText =
-                response.content[0]?.type === 'text'
-                    ? response.content[0].text
-                    : '';
+            if (this.provider === 'gemini') {
+                rawText = await this.callGemini(systemPrompt, recentMessages);
+            } else {
+                rawText = await this.callClaude(systemPrompt, recentMessages);
+            }
 
+            console.log('LLM responded: YES');
             if (config.isDev) {
-              console.log('\n[DEBUG] RAW CLAUDE RESPONSE:');
-              console.log(rawText);
-              console.log('[DEBUG] END RAW RESPONSE\n');
+                console.log('\n[DEBUG] RAW LLM RESPONSE:');
+                console.log(rawText);
+                console.log('[DEBUG] END RAW RESPONSE\n');
             }
 
             // Parse structured output
@@ -125,6 +161,10 @@ export class AiOrchestrator {
             // Persist session
             await this.saveSession(sessionId, input.userId, messages);
 
+            console.log(`[AI] searchQuery: ${parsed.searchQuery ? `"${parsed.searchQuery}"` : '(none)'}`);
+            console.log('Response returned to frontend: YES');
+            console.log('=== END PIPELINE TRACE ===\n');
+
             return {
                 text: parsed.text,
                 searchQuery: parsed.searchQuery,
@@ -133,19 +173,51 @@ export class AiOrchestrator {
                 sessionId,
             };
         } catch (err: any) {
-            const errorType = err?.constructor?.name || 'UnknownError';
-            const statusCode = err?.status || err?.statusCode || 'N/A';
             const errorMessage = err?.message || String(err);
-            console.error(`[AI] Claude API error — type: ${errorType}, status: ${statusCode}, message: ${errorMessage}`);
-            if (err?.error) {
-                console.error('[AI] Error body:', JSON.stringify(err.error, null, 2));
-            }
+            console.error(`[AI] ${this.provider} error: ${errorMessage}`);
+            console.log('LLM responded: NO (error)');
+            console.log('=== END PIPELINE TRACE ===\n');
             return {
-                text: "I'm having trouble right now. Could you try again?",
+                text: `⚠️ LLM error (${this.provider}): ${errorMessage}`,
                 preferenceInsights: [],
                 sessionId,
             };
         }
+    }
+
+    // ─── LLM Providers ───────────────────────────────────
+
+    private async callGemini(systemPrompt: string, messages: SessionMessage[]): Promise<string> {
+        const model = this.geminiClient!.getGenerativeModel({
+            model: config.gemini.model,
+            systemInstruction: systemPrompt,
+        });
+
+        // Convert session messages to Gemini format
+        const history = messages.slice(0, -1).map((m) => ({
+            role: m.role === 'assistant' ? 'model' as const : 'user' as const,
+            parts: [{ text: m.content }],
+        }));
+
+        const lastMessage = messages[messages.length - 1].content;
+
+        const chat = model.startChat({ history });
+        const result = await chat.sendMessage(lastMessage);
+        return result.response.text();
+    }
+
+    private async callClaude(systemPrompt: string, messages: SessionMessage[]): Promise<string> {
+        const response = await this.anthropicClient!.messages.create({
+            model: config.anthropic.model,
+            max_tokens: 1024,
+            system: systemPrompt,
+            messages: messages.map((m) => ({
+                role: m.role as 'user' | 'assistant',
+                content: m.content,
+            })),
+        });
+
+        return response.content[0]?.type === 'text' ? response.content[0].text : '';
     }
 
     // ─── Session persistence ─────────────────────────────
@@ -241,12 +313,22 @@ Rules:
   "intent": {
     "type": "food_discovery|drink_discovery|coffee_discovery|activity_discovery|navigation|general",
     "category": "restaurant|cafe|bar|coffee_shop|bakery|park|...",
-    "neighborhood": "<Boston neighborhood or empty string>"
+    "neighborhood": "<Boston neighborhood or empty string>",
+    "travel_willingness": "default|nearby|flexible|specific",
+    "max_walk_minutes": null
   },
   "preference_insights": [
     {"type": "cuisine_like|cuisine_dislike|price_preference|ambiance_preference|dietary_restriction", "value": "<value>", "confidence": 0.0}
   ]
 }
+
+travel_willingness values:
+- "nearby": user said "near me", "close by", "walking distance"
+- "flexible": user said "don't mind traveling", "worth the trip", "anywhere in Boston"
+- "specific": user named a specific place or distant neighborhood
+- "default": no mention of distance
+
+max_walk_minutes: if user specifies a time limit (e.g. "5 minute walk"), extract as integer. Otherwise null.
 \`\`\`
 
 ## Few-Shot Examples

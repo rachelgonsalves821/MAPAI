@@ -5,7 +5,6 @@
 
 import apiClient from '@/services/api/client';
 import { useAuthStore, UserPreferencesState } from '@/store/authStore';
-import { useOnboardingStore } from '@/store/onboardingStore';
 
 /**
  * Save preferences to backend and update local stores.
@@ -15,9 +14,8 @@ export async function savePreferences(
   userId: string,
   preferences: UserPreferencesState
 ): Promise<boolean> {
-  // Update local stores immediately
+  // Update local store immediately
   useAuthStore.getState().updatePreferences(preferences);
-  useOnboardingStore.getState().setPreferences(preferences);
 
   // Map to backend schema
   const priceMap: Record<string, number> = {

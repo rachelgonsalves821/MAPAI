@@ -4,20 +4,27 @@
  */
 
 import 'dotenv/config';
+import { requireEnv, optionalEnv } from './lib/env.js';
 
-console.log('--- Config Environment Check ---');
-console.log('NODE_ENV:', process.env.NODE_ENV);
-console.log('ANTHROPIC_API_KEY:', process.env.ANTHROPIC_API_KEY ? 'Found' : 'MISSING');
-console.log('GOOGLE_PLACES_API_KEY:', process.env.GOOGLE_PLACES_API_KEY ? 'Found' : 'MISSING');
-console.log('SUPABASE_URL:', process.env.SUPABASE_URL ? 'Found' : 'MISSING');
-console.log('--------------------------------');
+const nodeEnv = optionalEnv('NODE_ENV', 'development');
+const isDev = nodeEnv === 'development';
+
+/** Allowed CORS origins. Parsed from comma-separated CORS_ORIGIN env var. */
+const DEFAULT_ORIGINS = ['http://localhost:3000', 'http://localhost:8081'];
+const PRODUCTION_ORIGINS = ['https://mapai.app', 'https://www.mapai.app'];
+
+function parseCorsOrigins(): string[] {
+    const raw = process.env.CORS_ORIGIN;
+    if (!raw) return isDev ? DEFAULT_ORIGINS : PRODUCTION_ORIGINS;
+    return raw.split(',').map((o) => o.trim()).filter(Boolean);
+}
 
 export const config = {
     // Server
-    port: parseInt(process.env.PORT || '3001', 10),
-    host: process.env.HOST || '0.0.0.0',
-    nodeEnv: process.env.NODE_ENV || 'development',
-    isDev: (process.env.NODE_ENV || 'development') === 'development',
+    port: parseInt(optionalEnv('PORT', '3001'), 10),
+    host: optionalEnv('HOST', '0.0.0.0'),
+    nodeEnv,
+    isDev,
 
     // Supabase
     supabase: {
@@ -27,10 +34,19 @@ export const config = {
         jwtSecret: process.env.SUPABASE_JWT_SECRET || '',
     },
 
+    // LLM Provider: 'gemini' or 'anthropic'
+    llmProvider: optionalEnv('LLM_PROVIDER', 'gemini') as 'gemini' | 'anthropic',
+
     // Anthropic Claude
     anthropic: {
         apiKey: process.env.ANTHROPIC_API_KEY || '',
-        model: process.env.CLAUDE_MODEL || 'claude-sonnet-4-5-20250514',
+        model: optionalEnv('CLAUDE_MODEL', 'claude-sonnet-4-5-20250514'),
+    },
+
+    // Google Gemini
+    gemini: {
+        apiKey: process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_PLACES_API_KEY || '',
+        model: optionalEnv('GEMINI_MODEL', 'gemini-2.0-flash'),
     },
 
     // Google Places
@@ -44,7 +60,7 @@ export const config = {
     },
 
     // CORS
-    corsOrigin: process.env.CORS_ORIGIN || '*',
+    corsOrigins: parseCorsOrigins(),
 } as const;
 
 // Validate required config on startup
@@ -57,5 +73,12 @@ export function validateConfig(): string[] {
     if (!config.google.placesApiKey) warnings.push('GOOGLE_PLACES_API_KEY not set');
     if (!config.supabase.url) warnings.push('SUPABASE_URL not set — auth disabled');
     if (!config.redis.url) warnings.push('REDIS_URL not set — using in-memory cache');
+
+    // In production, enforce critical secrets
+    if (!isDev) {
+        if (!config.supabase.jwtSecret) warnings.push('CRITICAL: SUPABASE_JWT_SECRET not set in production');
+        if (!config.anthropic.apiKey) warnings.push('CRITICAL: ANTHROPIC_API_KEY not set in production');
+    }
+
     return warnings;
 }

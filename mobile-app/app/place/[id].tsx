@@ -16,16 +16,15 @@ import {
     Platform,
     ActivityIndicator,
     FlatList,
+    Linking,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, BorderRadius, Shadows } from '@/constants/theme';
 import { Place, SocialSignal } from '@/types';
-import { getPlaceDetails, getPlacePhotoUrl } from '@/services/places';
-import { fetchRedditSignals } from '@/services/reddit';
-import { scorePlaces } from '@/services/scoring';
-import { loadPreferences } from '@/services/preferences';
+import { getPlacePhotoUrl } from '@/services/places';
 
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:3001';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function PlaceDetailScreen() {
@@ -43,26 +42,52 @@ export default function PlaceDetailScreen() {
         if (!id) return;
         setLoading(true);
         try {
-            const details = await getPlaceDetails(id);
-            if (details) {
-                // Score with real LLM personalization
-                const userPrefs = await loadPreferences();
-                const scored = await scorePlaces([details], userPrefs);
-                const enriched = scored[0] || details;
-
-                // Fetch real Reddit social signals
-                const signals = await fetchRedditSignals(enriched.name, enriched.neighborhood);
-                enriched.socialSignals = signals;
-
-                setPlace(enriched);
+            // Fetch directly from backend — already returns scored + enriched data
+            const res = await fetch(`${BACKEND_URL}/v1/places/${id}`);
+            if (!res.ok) throw new Error(`Backend returned ${res.status}`);
+            const json = await res.json();
+            const data = json.data?.place;
+            if (data) {
+                // Map backend response to Place type with safe defaults
+                const mapped: Place = {
+                    id: data.id || id,
+                    googlePlaceId: data.id || id,
+                    name: data.name || 'Unknown',
+                    category: data.category || 'restaurant',
+                    categoryChips: [data.category || 'restaurant'].filter(Boolean),
+                    address: data.address || '',
+                    neighborhood: 'Boston' as any,
+                    location: data.location || { latitude: 0, longitude: 0 },
+                    rating: data.rating || 0,
+                    priceLevel: data.priceLevel ?? 2,
+                    photos: data.photos || [],
+                    openNow: data.openNow,
+                    hours: data.hours || [],
+                    phoneNumber: data.phoneNumber || '',
+                    website: data.website || '',
+                    matchScore: data.matchScore ?? 50,
+                    matchReasons: data.matchReasons || [],
+                    socialSignals: data.socialSignals || [],
+                    isLoyalty: false,
+                    visitCount: 0,
+                };
+                setPlace(mapped);
             } else {
                 setPlace(null);
             }
         } catch (err) {
             console.error('Failed to load place:', err);
+            setPlace(null);
         } finally {
             setLoading(false);
         }
+    };
+
+    const handleNavigate = () => {
+        if (!place) return;
+        // Open Google Maps with walking directions
+        const url = `https://www.google.com/maps/dir/?api=1&destination=${place.location.latitude},${place.location.longitude}&destination_place_id=${place.id}&travelmode=walking`;
+        Linking.openURL(url);
     };
 
     if (loading) {
@@ -221,10 +246,13 @@ export default function PlaceDetailScreen() {
 
                 {/* CTA row */}
                 <View style={styles.ctaRow}>
-                    <TouchableOpacity style={[styles.ctaButton, styles.ctaPrimary]}>
-                        <Ionicons name="navigate" size={18} color={Colors.textOnBrand} />
+                    <TouchableOpacity
+                        style={[styles.ctaButton, styles.ctaPrimary]}
+                        onPress={handleNavigate}
+                    >
+                        <Ionicons name="walk" size={18} color={Colors.textOnBrand} />
                         <Text style={[styles.ctaText, styles.ctaPrimaryText]}>
-                            Navigate
+                            Walk there
                         </Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={styles.ctaButton}>
