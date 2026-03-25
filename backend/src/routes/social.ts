@@ -11,6 +11,7 @@ import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth.js';
 import { envelope, errorResponse } from '../utils/response.js';
 import { getSupabase, hasDatabase } from '../db/supabase-client.js';
+import { SocialService } from '../services/social-service.js';
 
 const friendRequestSchema = z.object({
   to_user_id: z.string().uuid(),
@@ -21,6 +22,7 @@ const updateRequestSchema = z.object({
 });
 
 export async function socialRoutes(app: FastifyInstance) {
+  const social = new SocialService();
   /**
    * GET /v1/social/friends
    */
@@ -30,7 +32,9 @@ export async function socialRoutes(app: FastifyInstance) {
       const userId = request.user!.id;
 
       if (!hasDatabase()) {
-        return envelope({ friends: [], count: 0 });
+        // Use service method which has in-memory fallback with seed data
+        const friends = await social.getFriends(userId);
+        return envelope({ friends, count: friends.length });
       }
 
       const supabase = getSupabase()!;
@@ -226,6 +230,144 @@ export async function socialRoutes(app: FastifyInstance) {
       }
 
       return envelope({ status });
+    },
+  });
+
+  // ─── Block / Unblock ─────────────────────────────────────
+
+  app.post('/block', {
+    preHandler: authMiddleware,
+    handler: async (request, reply) => {
+      const { target_user_id, reason } = request.body as any;
+      if (!target_user_id) {
+        return reply.status(400).send(errorResponse(400, 'target_user_id required', 'ValidationError'));
+      }
+      const userId = request.user!.id;
+      await social.blockUser(userId, target_user_id, reason);
+      return envelope({ blocked: true });
+    },
+  });
+
+  app.post('/unblock', {
+    preHandler: authMiddleware,
+    handler: async (request, reply) => {
+      const { target_user_id } = request.body as any;
+      if (!target_user_id) {
+        return reply.status(400).send(errorResponse(400, 'target_user_id required', 'ValidationError'));
+      }
+      await social.unblockUser(request.user!.id, target_user_id);
+      return envelope({ unblocked: true });
+    },
+  });
+
+  // ─── Loved Places ────────────────────────────────────────
+
+  app.post('/loved-places', {
+    preHandler: authMiddleware,
+    handler: async (request) => {
+      const userId = request.user!.id;
+      const { place_id, rating, one_line_review, personal_note, visibility, place_name, location } = request.body as any;
+      const result = await social.lovePlace(userId, place_id, {
+        rating,
+        oneLineReview: one_line_review,
+        personalNote: personal_note,
+        visibility,
+        placeName: place_name,
+        location,
+      });
+      return envelope(result);
+    },
+  });
+
+  app.delete('/loved-places/:placeId', {
+    preHandler: authMiddleware,
+    handler: async (request) => {
+      const userId = request.user!.id;
+      const { placeId } = request.params as any;
+      await social.unlovePlace(userId, placeId);
+      return envelope({ removed: true });
+    },
+  });
+
+  app.get('/loved-places/:userId', {
+    preHandler: authMiddleware,
+    handler: async (request) => {
+      const viewerId = request.user!.id;
+      const { userId } = request.params as any;
+      const places = await social.getLovedPlaces(userId, viewerId);
+      return envelope({ places, count: places.length });
+    },
+  });
+
+  app.get('/loved-places/place/:placeId/friends', {
+    preHandler: authMiddleware,
+    handler: async (request) => {
+      const userId = request.user!.id;
+      const { placeId } = request.params as any;
+      const friends = await social.getFriendsWhoLovePlace(placeId, userId);
+      return envelope({ friends, count: friends.length });
+    },
+  });
+
+  // ─── Activity Feed ───────────────────────────────────────
+
+  app.get('/feed', {
+    preHandler: authMiddleware,
+    handler: async (request) => {
+      const userId = request.user!.id;
+      const { limit, cursor } = request.query as any;
+      const feed = await social.getFriendFeed(userId, parseInt(limit) || 20, cursor);
+      return envelope({
+        items: feed,
+        count: feed.length,
+        next_cursor: feed.length > 0 ? feed[feed.length - 1].created_at : null,
+      });
+    },
+  });
+
+  // ─── Reactions ───────────────────────────────────────────
+
+  app.post('/react', {
+    preHandler: authMiddleware,
+    handler: async (request) => {
+      const userId = request.user!.id;
+      const { activity_id, reaction } = request.body as any;
+      await social.reactToActivity(activity_id, userId, reaction);
+      return envelope({ reacted: true });
+    },
+  });
+
+  app.delete('/react/:activityId', {
+    preHandler: authMiddleware,
+    handler: async (request) => {
+      const userId = request.user!.id;
+      const { activityId } = request.params as any;
+      await social.removeReaction(activityId, userId);
+      return envelope({ removed: true });
+    },
+  });
+
+  // ─── Friendship Status ──────────────────────────────────
+
+  app.get('/status/:targetId', {
+    preHandler: authMiddleware,
+    handler: async (request) => {
+      const userId = request.user!.id;
+      const { targetId } = request.params as any;
+      const status = await social.getFriendshipStatus(userId, targetId);
+      return envelope({ status });
+    },
+  });
+
+  // ─── Report ─────────────────────────────────────────────
+
+  app.post('/report', {
+    preHandler: authMiddleware,
+    handler: async (request) => {
+      const userId = request.user!.id;
+      const { target_user_id, report_type, details } = request.body as any;
+      await social.reportUser(userId, target_user_id, report_type, details);
+      return envelope({ reported: true });
     },
   });
 }

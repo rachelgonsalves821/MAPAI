@@ -1,194 +1,161 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+/**
+ * Mapai — Auth Context (Clerk)
+ * Provides user state, onboarding check, and route guarding.
+ * Clerk handles OAuth sessions; Supabase is data-only via Clerk JWT bridge.
+ */
+
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useRouter, useSegments } from 'expo-router';
-import { supabase } from '@/services/supabase';
-import type { Session } from '@supabase/supabase-js';
+
+// Clerk imports — wrapped for web/dev compatibility
+let useClerkAuth: any;
+let useClerkUser: any;
+try {
+  const clerk = require('@clerk/clerk-expo');
+  useClerkAuth = clerk.useAuth;
+  useClerkUser = clerk.useUser;
+} catch {
+  // Clerk not available (web dev, SSR) — use stubs
+  useClerkAuth = () => ({ isSignedIn: false, isLoaded: true, signOut: async () => {}, getToken: async () => null });
+  useClerkUser = () => ({ user: null, isLoaded: true });
+}
 
 interface User {
   id: string;
   email?: string;
   displayName?: string;
   username?: string;
+  avatarUrl?: string;
   onboardingComplete: boolean;
 }
 
 interface AuthContextType {
   user: User | null;
   isLoading: boolean;
-  signIn: (email: string, password: string) => Promise<void>;
-  signInWithGoogle: () => Promise<void>;
-  signInAsGuest: () => Promise<void>;
   signOut: () => Promise<void>;
   updateUser: (updates: Partial<User>) => void;
+  getToken: (options?: { template?: string }) => Promise<string | null>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const IS_DEV = process.env.NODE_ENV !== 'production';
 
-/** Extract our User shape from a Supabase session */
-function userFromSession(session: Session): User {
-  const supaUser = session.user;
-  const meta = supaUser.user_metadata ?? {};
-  return {
-    id: supaUser.id,
-    email: supaUser.email ?? undefined,
-    displayName: meta.full_name ?? meta.name ?? supaUser.email ?? 'Explorer',
-    onboardingComplete: meta.onboarding_complete ?? false,
-  };
-}
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const { isSignedIn, isLoaded: authLoaded, signOut: clerkSignOut, getToken } = useClerkAuth();
+  const { user: clerkUser, isLoaded: userLoaded } = useClerkUser();
+
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [onboardingChecked, setOnboardingChecked] = useState(false);
   const router = useRouter();
   const segments = useSegments();
 
-  // ── Bootstrap: get initial session + subscribe to changes ──
+  // Sync Clerk user → local user state
   useEffect(() => {
-    let isMounted = true;
+    if (!authLoaded || !userLoaded) return;
 
-    async function init() {
-      try {
-        if (supabase) {
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session && isMounted) {
-            setUser(userFromSession(session));
+    if (isSignedIn && clerkUser) {
+      const mapped: User = {
+        id: clerkUser.id,
+        email: clerkUser.primaryEmailAddress?.emailAddress,
+        displayName: clerkUser.fullName ?? clerkUser.firstName ?? undefined,
+        username: clerkUser.username ?? undefined,
+        avatarUrl: clerkUser.imageUrl,
+        onboardingComplete: false, // Will be checked below
+      };
+      setUser(mapped);
+      checkOnboardingStatus(clerkUser.id, mapped);
+    } else {
+      // Dev guest mode
+      if (IS_DEV && !isSignedIn) {
+        // Don't auto-set dev user — wait for explicit guest sign-in
+      }
+      setUser(null);
+      setOnboardingChecked(true);
+      setIsLoading(false);
+    }
+  }, [isSignedIn, authLoaded, userLoaded, clerkUser?.id]);
+
+  async function checkOnboardingStatus(clerkUserId: string, mappedUser: User) {
+    try {
+      // Try fetching profile from backend
+      const token = await getToken();
+      if (token) {
+        const backendUrl = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:3001';
+        const res = await fetch(`${backendUrl}/v1/user/profile`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const profile = data.data;
+          if (profile) {
+            mappedUser.onboardingComplete = profile.is_onboarded ?? profile.onboarding_complete ?? false;
+            mappedUser.displayName = profile.display_name ?? mappedUser.displayName;
+            mappedUser.username = profile.username ?? mappedUser.username;
           }
         }
-
-        // If no Supabase session AND dev mode, try loading stored dev user
-        if (!supabase || !(await hasSupabaseSession())) {
-          await loadDevUser(isMounted);
-        }
-      } catch (e) {
-        console.error('Auth init error:', e);
-      } finally {
-        if (isMounted) setIsLoading(false);
       }
-    }
-
-    init();
-
-    // Live session listener
-    let subscription: { unsubscribe: () => void } | undefined;
-    if (supabase) {
-      const { data } = supabase.auth.onAuthStateChange((_event: string, session: Session | null) => {
-        if (!isMounted) return;
-        if (session) {
-          setUser(userFromSession(session));
-        } else {
-          setUser(null);
-        }
-      });
-      subscription = data.subscription;
-    }
-
-    return () => {
-      isMounted = false;
-      subscription?.unsubscribe();
-    };
-  }, []);
-
-  async function hasSupabaseSession(): Promise<boolean> {
-    if (!supabase) return false;
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      return !!session;
     } catch {
-      return false;
+      // Backend unavailable — assume not onboarded
     }
+
+    setUser({ ...mappedUser });
+    setOnboardingChecked(true);
+    setIsLoading(false);
   }
 
-  /** In dev mode, restore a previously-stored dev user from AsyncStorage */
-  async function loadDevUser(isMounted: boolean) {
-    if (!IS_DEV) return;
-    try {
-      const storedUser = await AsyncStorage.getItem('user_data');
-      if (storedUser && isMounted) {
-        setUser(JSON.parse(storedUser));
-      }
-    } catch (e) {
-      console.error('Failed to load dev user:', e);
-    }
-  }
-
-  // ── Route guard ──
+  // Route guard
   useEffect(() => {
-    if (isLoading) return;
+    if (isLoading || !onboardingChecked) return;
 
     const inAuthGroup = segments[0] === '(auth)';
-    const inOnboardingGroup = segments[0] === '(onboarding)';
 
-    if (!user && !inAuthGroup) {
-      // No user — go to sign-in
-      router.replace('/(auth)/sign-in');
-    } else if (user && !user.onboardingComplete && !inOnboardingGroup) {
-      router.replace('/(onboarding)');
-    } else if (user && user.onboardingComplete && (inAuthGroup || inOnboardingGroup)) {
+    if (!user) {
+      if (!inAuthGroup) {
+        router.replace('/(auth)/landing');
+      }
+    } else if (!user.onboardingComplete) {
+      // Signed in but not onboarded — allow auth flow screens
+      if (!inAuthGroup) {
+        router.replace('/(auth)/create-identity');
+      }
+    } else if (user.onboardingComplete && inAuthGroup) {
       router.replace('/home');
     }
-  }, [user, segments, isLoading]);
+  }, [user, segments, isLoading, onboardingChecked]);
 
-  // ── Auth actions ──
-
-  const signIn = async (email: string, password: string) => {
-    if (!supabase) throw new Error('Supabase not initialised');
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
-    // onAuthStateChange listener will update user state
-  };
-
-  const signInWithGoogle = async () => {
-    if (!supabase) throw new Error('Supabase not initialised');
-    // Implemented in sign-in screen via OAuth + WebBrowser
-    // This is a convenience method if called directly
-    const Linking = await import('expo-linking');
-    const WebBrowser = await import('expo-web-browser');
-
-    const redirectUri = Linking.createURL('auth/callback');
-    const { data, error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo: redirectUri, skipBrowserRedirect: true },
-    });
-    if (error) throw error;
-    if (data.url) {
-      await WebBrowser.openAuthSessionAsync(data.url, redirectUri);
-    }
-  };
-
-  const signInAsGuest = async () => {
-    const devUser: User = {
-      id: 'dev-user-001',
-      email: 'dev@mapai.app',
-      displayName: 'Dev Explorer',
-      onboardingComplete: false,
-    };
-    await AsyncStorage.setItem('auth_token', 'dev-token-secret');
-    await AsyncStorage.setItem('user_data', JSON.stringify(devUser));
-    setUser(devUser);
-  };
-
-  const signOut = async () => {
-    if (supabase) {
-      await supabase.auth.signOut().catch(() => {});
-    }
-    await AsyncStorage.removeItem('auth_token');
-    await AsyncStorage.removeItem('user_data');
+  const handleSignOut = useCallback(async () => {
+    try {
+      await clerkSignOut();
+    } catch {}
     setUser(null);
-  };
+  }, [clerkSignOut]);
 
-  const updateUser = (updates: Partial<User>) => {
-    if (user) {
-      const updated = { ...user, ...updates };
-      setUser(updated);
-      AsyncStorage.setItem('user_data', JSON.stringify(updated));
-    }
-  };
+  const updateUser = useCallback((updates: Partial<User>) => {
+    setUser((prev) => (prev ? { ...prev, ...updates } : null));
+  }, []);
+
+  const handleGetToken = useCallback(
+    async (options?: { template?: string }) => {
+      try {
+        return await getToken(options);
+      } catch {
+        return null;
+      }
+    },
+    [getToken]
+  );
 
   return (
     <AuthContext.Provider
-      value={{ user, isLoading, signIn, signInWithGoogle, signInAsGuest, signOut, updateUser }}
+      value={{
+        user,
+        isLoading,
+        signOut: handleSignOut,
+        updateUser,
+        getToken: handleGetToken,
+      }}
     >
       {children}
     </AuthContext.Provider>
@@ -198,15 +165,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 export function useAuth() {
   const context = useContext(AuthContext);
   if (context === undefined) {
-    // Safe defaults when AuthProvider is not mounted (MVP mode / SSR pre-render)
     return {
       user: null,
       isLoading: false,
-      signIn: async () => {},
-      signInWithGoogle: async () => {},
-      signInAsGuest: async () => {},
       signOut: async () => {},
       updateUser: () => {},
+      getToken: async () => null,
     } as AuthContextType;
   }
   return context;

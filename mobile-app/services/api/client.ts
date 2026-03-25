@@ -1,6 +1,5 @@
 import axios, { AxiosInstance, AxiosError, InternalAxiosRequestConfig } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { supabase } from '../supabase';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:3001';
 
@@ -12,17 +11,23 @@ const apiClient: AxiosInstance = axios.create({
   },
 });
 
-// Request Interceptor: prefer live Supabase session token (auto-refreshed), fallback to stored token
+/**
+ * Set the auth token for all API requests.
+ * Called from AuthContext when Clerk provides a token.
+ */
+let _authToken: string | null = null;
+export function setApiAuthToken(token: string | null) {
+  _authToken = token;
+}
+
+// Request interceptor: inject auth token
 apiClient.interceptors.request.use(
   async (config: InternalAxiosRequestConfig) => {
     try {
-      // Try Supabase session first — always fresh thanks to autoRefreshToken
-      if (supabase) {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.access_token) {
-          config.headers.Authorization = `Bearer ${session.access_token}`;
-          return config;
-        }
+      // Use Clerk token if set
+      if (_authToken) {
+        config.headers.Authorization = `Bearer ${_authToken}`;
+        return config;
       }
 
       // Fallback: stored token (dev mode / guest)
@@ -38,7 +43,7 @@ apiClient.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Response Interceptor: Global Error Handling
+// Response interceptor: global error handling
 apiClient.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {
@@ -46,7 +51,6 @@ apiClient.interceptors.response.use(
 
     if (status === 401) {
       console.warn('Unauthorized access - token may be invalid or expired');
-      // Potential trigger for logout or token refresh logic
     } else if (status === 404) {
       console.error('Resource not found:', error.config?.url);
     } else if (status && status >= 500) {

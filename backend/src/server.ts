@@ -16,6 +16,12 @@ import { navigationRoutes } from './routes/navigation.js';
 import { healthRoutes } from './routes/health.js';
 import { userRoutes } from './routes/user.js';
 import { socialRoutes } from './routes/social.js';
+import { planningRoutes } from './routes/planning.js';
+import { loyaltyRoutes } from './routes/loyalty.js';
+import { reviewRoutes } from './routes/reviews.js';
+import { friendRoutes } from './routes/friends.js';
+import { usersSearchRoutes } from './routes/users-search.js';
+import { chatHistoryRoutes } from './routes/chat-history.js';
 
 async function main() {
     // Validate config
@@ -66,6 +72,12 @@ async function main() {
     await app.register(userRoutes, { prefix: '/v1/user' });
     await app.register(navigationRoutes, { prefix: '/v1/navigation' });
     await app.register(socialRoutes, { prefix: '/v1/social' });
+    await app.register(planningRoutes, { prefix: '/v1/planning' });
+    await app.register(loyaltyRoutes, { prefix: '/v1/loyalty' });
+    await app.register(reviewRoutes, { prefix: '/v1/reviews' });
+    await app.register(friendRoutes, { prefix: '/v1/friends' });
+    await app.register(usersSearchRoutes, { prefix: '/v1/users' });
+    await app.register(chatHistoryRoutes, { prefix: '/v1/chat/history' });
 
     // Global error handler
     app.setErrorHandler((error: any, _request, reply) => {

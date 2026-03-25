@@ -1,19 +1,8 @@
-import { Stack } from 'expo-router';
-import { Colors } from '@/constants/theme';
-
-export default function OnboardingLayout() {
-  return (
-    <Stack
-      screenOptions={{
-        headerShown: false,
-        contentStyle: { backgroundColor: Colors.background },
-        animation: 'slide_from_right',
-      }}
-    >
-      <Stack.Screen name="index" />
-      <Stack.Screen name="create-id" />
-      <Stack.Screen name="find-friends" />
-      <Stack.Screen name="complete" />
-    </Stack>
-  );
+/**
+ * DEPRECATED — onboarding flow has moved to app/(auth)/.
+ * This file is intentionally left empty to allow safe deletion.
+ * Do not import anything from this directory.
+ */
+export default function DeprecatedOnboardingLayout() {
+  return null;
 }

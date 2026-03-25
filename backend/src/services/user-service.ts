@@ -84,11 +84,36 @@ export class UserService {
         // Also delete friend connections where user is the friend
         await (supabase.from('friend_connections') as any).delete().eq('friend_id', userId).catch(() => {});
 
-        // 2. Delete Supabase Auth user (requires service role)
-        const { error: authError } = await supabase.auth.admin.deleteUser(userId);
-        if (authError) {
-            console.warn(`[User] Auth user deletion failed: ${authError.message}`);
+        // Also delete from new tables (Clerk migration)
+        const newTables = ['chat_messages', 'chat_sessions', 'friendships', 'user_profiles'];
+        for (const table of newTables) {
+            const col = table === 'chat_messages' ? 'clerk_user_id' : table === 'friendships' ? 'requester_id' : 'clerk_user_id';
+            await (supabase.from(table) as any).delete().eq(col, userId).catch(() => {});
+        }
+        // Friendships where user is addressee
+        await (supabase.from('friendships') as any).delete().eq('addressee_id', userId).catch(() => {});
+
+        // 2. Delete Clerk auth user (if Clerk SDK available)
+        try {
+            const clerkSecretKey = process.env.CLERK_SECRET_KEY;
+            if (clerkSecretKey) {
+                const { createClerkClient } = await import('@clerk/clerk-sdk-node');
+                const clerk = createClerkClient({ secretKey: clerkSecretKey });
+                await clerk.users.deleteUser(userId);
+            }
+        } catch (err: any) {
+            console.warn(`[User] Clerk user deletion failed: ${err.message}`);
             // Non-fatal — data is already gone
+        }
+
+        // Legacy: try Supabase Auth deletion too (backward compat)
+        try {
+            const { error: authError } = await supabase.auth.admin.deleteUser(userId);
+            if (authError) {
+                console.warn(`[User] Supabase Auth user deletion failed: ${authError.message}`);
+            }
+        } catch {
+            // Not available or already deleted
         }
 
         // 3. Redis cache clear (best-effort)

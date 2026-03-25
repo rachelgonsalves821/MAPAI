@@ -117,6 +117,53 @@
 
 ---
 
+> Session: 2026-03-25 — Clerk Auth Migration, 2FA, Social Onboarding
+
+## Decision: Migrated auth from Supabase Auth to Clerk
+- **Why**: Clerk provides native username support, pre-built React Native components, TOTP/SMS MFA, user search API, and contact matching — all features we'd have to build manually with Supabase Auth.
+- **Impact**: Supabase retained for PostgreSQL data layer only. Clerk JWTs bridge to Supabase RLS via JWT template.
+
+## Decision: Clerk imports use try/catch wrappers
+- **Context**: @clerk/clerk-expo doesn't resolve during Expo web dev mode
+- **Choice**: All Clerk imports (ClerkProvider, useAuth, useUser, useOAuth) wrapped in try/catch with stub fallbacks
+- **Why**: Prevents crashes in web dev and SSR pre-rendering while maintaining full native functionality
+
+## Decision: Old onboarding screens deprecated, not deleted
+- **Choice**: Old (onboarding) screens replaced with Redirect components pointing to new (auth) screens
+- **Why**: Prevents broken deep links. Safe to delete later once confirmed no references exist.
+
+## Decision: Auth middleware supports both Clerk and Supabase JWTs
+- **Choice**: Backend auth.ts tries Clerk SDK verification first, then falls back to Supabase JWT secret
+- **Why**: Enables gradual migration. Existing users with Supabase tokens still work during transition.
+
+## Decision: Onboarding heading uses Georgia serif
+- **Choice**: Platform.select({ ios: 'Georgia', android: 'serif' }) for all onboarding headings
+- **Why**: Matches mockup's serif aesthetic. Georgia is available on all iOS devices.
+
+## Decision: Dark navy #1A1A2E for heading text (not black)
+- **Context**: Mockups show headings in a dark navy-charcoal, not pure black
+- **Choice**: All serif headings use #1A1A2E consistently across screens
+- **Why**: Softer than pure black, matches the premium feel of the mockups
+
+## Decision: Photo placeholders instead of bundled images
+- **Context**: No actual photo assets provided for landing/ready/create-identity screens
+- **Choice**: Used warm-colored placeholder Views (#D4956A, #8B9E6B, #C4725A)
+- **Why**: Maintains layout integrity. Drop-in photo replacement is a single Image source swap.
+
+## Decision: Account deletion uses Clerk API + Supabase data deletion
+- **Choice**: DELETE /v1/user/account calls Clerk's deleteUser() then cleans all Supabase tables
+- **Why**: Must delete from both systems. Clerk deletion is non-fatal — data cleanup is more important.
+
+## Decision: MFA is opt-in, not required
+- **Choice**: Users can enable TOTP/SMS from Settings → Security, not forced during onboarding
+- **Why**: Reduces onboarding friction. Can be enforced later as user base grows.
+
+## Decision: apiClient.ts uses injectable auth token instead of Supabase session
+- **Choice**: Added setApiAuthToken() export for Clerk token injection, removed supabase.auth.getSession()
+- **Why**: Decouples API client from auth provider. Clerk tokens set from AuthContext.
+
+---
+
 > Session: 2026-03-24 — Map/Chat UI Fix + Place Detail + Transport Options
 
 ## Decision: Map always-visible with chat bottom sheet
@@ -183,6 +230,55 @@
 - **Context**: Need to detect "nearby"/"flexible"/"specific" travel intent
 - **Choice**: Added to mapai_intent JSON block that LLM emits
 - **Why**: Allows future radius adjustments based on user's stated preference
+
+---
+
+> Session: 2026-03-24 — Social Layer Phase 1 MVP
+
+## Decision: REST API, not GraphQL
+- **Context**: Spec called for GraphQL schema. Backend is Fastify REST.
+- **Choice**: Implemented as REST endpoints under /v1/social/
+- **Why**: Existing architecture is REST. Switching to GraphQL mid-build adds risk with no user benefit.
+
+## Decision: In-memory fallback for all social features
+- **Context**: Supabase may not be configured in dev
+- **Choice**: Every social service method has in-memory fallback (Map-based stores)
+- **Why**: Matches existing pattern (memory service, session store). Dev mode works without database.
+
+## Decision: Phase 1 only (friends, loved places, activity feed, blocks)
+- **Context**: Full spec included real-time location sharing, collaborative planning, WebSockets
+- **Choice**: Implemented Phase 1 MVP only. Deferred Phases 2-4.
+- **Why**: Phase 1 is the foundation. Location sharing and planning require Redis + WebSocket infra that doesn't exist yet.
+
+## Decision: place_id stored as Google Place ID string (not internal UUID)
+- **Context**: Spec assumed internal places table with UUID PKs
+- **Choice**: user_loved_places.place_id is VARCHAR(255) holding Google Place ID
+- **Why**: No internal places table yet. Google Place IDs are the canonical identifiers in the current system.
+
+## Decision: Activity fan-out is synchronous, not async job
+- **Context**: Spec called for async fan-out to Redis sorted sets
+- **Choice**: Activity events written to single table, feed generated at read time via friend list join
+- **Why**: No Redis. At current scale (<500 users), read-time fan-in from Supabase is fast enough.
+
+## Social API endpoints implemented:
+- POST /v1/social/block — block user (also removes friendship + pending requests)
+- POST /v1/social/unblock
+- POST /v1/social/loved-places — love a place (upsert)
+- DELETE /v1/social/loved-places/:placeId — unlove
+- GET /v1/social/loved-places/:userId — get user's loved places
+- GET /v1/social/loved-places/place/:placeId/friends — friends who love this place
+- GET /v1/social/feed — friend activity feed (paginated with cursor)
+- POST /v1/social/react — react to activity (heart, fire, clap, drool, bookmark, question)
+- DELETE /v1/social/react/:activityId — remove reaction
+- GET /v1/social/status/:targetId — friendship status check
+- POST /v1/social/report — report user
+
+## Deferred to Phase 2+:
+- Friend pins on map (purple with avatars)
+- Real-time location sharing (needs Redis + WebSocket)
+- Collaborative trip planning (needs WebSocket + session management)
+- Contact sync / phone number hashing
+- Push notifications (needs Firebase Cloud Messaging)
 
 ---
 
