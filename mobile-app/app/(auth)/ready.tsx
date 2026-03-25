@@ -13,23 +13,15 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { ChevronLeft, Check, MapPin } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useOnboardingStore } from '@/store/onboardingStore';
-import { supabase } from '@/services/supabase';
-
-// Clerk import — wrapped safely
-let useUser: (() => { user: any }) | null = null;
-try {
-  const clerk = require('@clerk/clerk-expo');
-  useUser = clerk.useUser;
-} catch {
-  useUser = () => ({ user: null });
-}
+import { useAuth } from '@/context/AuthContext';
+import apiClient from '@/services/api/client';
 
 export default function ReadyScreen() {
   const router = useRouter();
   const { displayName, selectedFriends, complete } = useOnboardingStore();
-  const clerkUser = useUser ? useUser().user : null;
+  const { getToken, updateUser } = useAuth();
 
   const friendCount = selectedFriends.length;
   const friendSubtitle =
@@ -39,21 +31,33 @@ export default function ReadyScreen() {
         ? '1 friend connected. Your map is waiting.'
         : `${friendCount} friends connected. Your map is waiting.`;
 
-  const resolvedName = displayName || clerkUser?.firstName || 'Explorer';
+  const resolvedName = displayName || 'Explorer';
 
   async function handleOpenMap() {
-    // Mark onboarding complete in Supabase
-    if (supabase && clerkUser) {
-      try {
-        await supabase
-          .from('user_profiles')
-          .update({ is_onboarded: true })
-          .eq('clerk_user_id', clerkUser.id);
-      } catch (e) {
-        console.warn('Supabase onboarding completion failed (non-blocking):', e);
-      }
+    // Mark onboarding complete via backend API
+    try {
+      const token = await getToken();
+      await apiClient.post(
+        '/v1/user/onboarding',
+        {
+          display_name: displayName || 'Explorer',
+          username: '',
+          is_onboarded: true,
+          preferences: {
+            cuisine_preferences: [],
+            ambiance_preferences: [],
+            dietary_restrictions: [],
+            price_range: { min: 1, max: 3 },
+          },
+        },
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+      );
+    } catch (e) {
+      console.warn('Backend onboarding completion failed (non-blocking):', e);
     }
+
     complete();
+    updateUser({ onboardingComplete: true });
     router.replace('/home');
   }
 
@@ -71,14 +75,14 @@ export default function ReadyScreen() {
 
       {/* Back arrow */}
       <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-        <ChevronLeft size={24} color="#FFFFFF" />
+        <Ionicons name="chevron-back" size={24} color="#FFFFFF" />
       </TouchableOpacity>
 
       {/* Bottom content */}
       <View style={styles.bottomContent}>
         {/* Checkmark */}
         <View style={styles.checkWrap}>
-          <Check size={28} color="#FFFFFF" strokeWidth={2.5} />
+          <Ionicons name="checkmark" size={28} color="#FFFFFF" />
         </View>
 
         {/* Heading */}
@@ -93,7 +97,7 @@ export default function ReadyScreen() {
         {/* CTA */}
         <TouchableOpacity style={styles.ctaButton} onPress={handleOpenMap} activeOpacity={0.85}>
           <Text style={styles.ctaText}>Open my map</Text>
-          <MapPin size={18} color="#0F1419" />
+          <Ionicons name="location" size={18} color="#0F1419" />
         </TouchableOpacity>
       </View>
     </View>

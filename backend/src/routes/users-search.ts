@@ -34,9 +34,9 @@ export async function usersSearchRoutes(app: FastifyInstance) {
 
             // username starts-with OR display_name contains, excluding self, limit 20
             const { data: results, error } = await (supabase.from('user_profiles') as any)
-                .select('id, display_name, username, avatar_url')
+                .select('clerk_user_id, display_name, username, avatar_url')
                 .or(`username.ilike.${query}%,display_name.ilike.%${query}%`)
-                .neq('id', userId)
+                .neq('clerk_user_id', userId)
                 .limit(20);
 
             if (error) {

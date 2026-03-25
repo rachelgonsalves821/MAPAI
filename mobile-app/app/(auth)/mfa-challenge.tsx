@@ -18,7 +18,7 @@ import {
   TextInputKeyPressEventData,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { ChevronLeft } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
 
 const CODE_LENGTH = 6;
 
@@ -94,7 +94,7 @@ export default function MfaChallengeScreen() {
         >
           {/* Back arrow */}
           <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-            <ChevronLeft size={24} color="#111827" />
+            <Ionicons name="chevron-back" size={24} color="#111827" />
           </TouchableOpacity>
 
           {/* Heading */}

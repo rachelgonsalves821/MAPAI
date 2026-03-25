@@ -10,9 +10,12 @@ import { authMiddleware } from '../middleware/auth.js';
 import { envelope, errorResponse } from '../utils/response.js';
 import { UserService } from '../services/user-service.js';
 import { getOrCreateUser, getPublicProfile } from '../services/identity-service.js';
+import { getSupabase, hasDatabase } from '../db/supabase-client.js';
 
 const onboardingSchema = z.object({
     display_name: z.string().min(1),
+    username: z.string().optional(),
+    is_onboarded: z.boolean().optional(),
     preferences: z.object({
         cuisine_preferences: z.array(z.string()),
         ambiance_preferences: z.array(z.string()),
@@ -21,7 +24,7 @@ const onboardingSchema = z.object({
             min: z.number(),
             max: z.number(),
         }),
-    }),
+    }).optional(),
 });
 
 export async function userRoutes(app: FastifyInstance) {
@@ -42,13 +45,27 @@ export async function userRoutes(app: FastifyInstance) {
             }
 
             const userId = request.user!.id;
-            
+
             try {
-                await userService.completeOnboarding({
-                    user_id: userId,
-                    display_name: parsed.data.display_name,
-                    preferences: parsed.data.preferences,
-                });
+                // Upsert into user_profiles (Clerk migration)
+                if (hasDatabase()) {
+                    const supabase = getSupabase()!;
+                    await (supabase.from('user_profiles') as any).upsert({
+                        clerk_user_id: userId,
+                        display_name: parsed.data.display_name,
+                        username: parsed.data.username || '',
+                        is_onboarded: parsed.data.is_onboarded ?? true,
+                    }, { onConflict: 'clerk_user_id' });
+                }
+
+                // Also update legacy users table if preferences provided
+                if (parsed.data.preferences) {
+                    await userService.completeOnboarding({
+                        user_id: userId,
+                        display_name: parsed.data.display_name,
+                        preferences: parsed.data.preferences,
+                    });
+                }
 
                 return envelope({ success: true, message: 'Onboarding complete' });
             } catch (error: any) {

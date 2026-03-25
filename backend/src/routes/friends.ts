@@ -251,8 +251,8 @@ export async function friendRoutes(app: FastifyInstance) {
 
             // Join with user_profiles
             const { data: profiles, error: profileError } = await (supabase.from('user_profiles') as any)
-                .select('id, display_name, username, avatar_url')
-                .in('id', friendIds);
+                .select('clerk_user_id, display_name, username, avatar_url')
+                .in('clerk_user_id', friendIds);
 
             if (profileError) {
                 app.log.error(profileError, 'Failed to fetch friend profiles');
@@ -261,7 +261,7 @@ export async function friendRoutes(app: FastifyInstance) {
                 );
             }
 
-            const profileMap = new Map((profiles || []).map((p: any) => [p.id, p]));
+            const profileMap = new Map((profiles || []).map((p: any) => [p.clerk_user_id, p]));
 
             const friends = friendships.map((f: any) => {
                 const friendId = f.requester_id === userId ? f.addressee_id : f.requester_id;
@@ -307,9 +307,9 @@ export async function friendRoutes(app: FastifyInstance) {
             const supabase = getSupabase()!;
 
             const { data: matches, error } = await (supabase.from('user_profiles') as any)
-                .select('id, display_name, username, avatar_url, email')
+                .select('clerk_user_id, display_name, username, avatar_url')
                 .in('email', emails)
-                .neq('id', userId);
+                .neq('clerk_user_id', userId);
 
             if (error) {
                 app.log.error(error, 'Failed to match contacts');

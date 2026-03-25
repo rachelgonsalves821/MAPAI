@@ -19,8 +19,10 @@ import {
   ScrollView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { ChevronLeft, Check, X } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useOnboardingStore } from '@/store/onboardingStore';
+import { useAuth } from '@/context/AuthContext';
+import apiClient from '@/services/api/client';
 import { supabase } from '@/services/supabase';
 
 // Clerk import — wrapped safely
@@ -108,6 +110,8 @@ export default function CreateIdentityScreen() {
     };
   }, []);
 
+  const { getToken } = useAuth();
+
   async function handleContinue() {
     Keyboard.dismiss();
     const trimmedName = localName.trim();
@@ -128,17 +132,25 @@ export default function CreateIdentityScreen() {
       }
     }
 
-    // Insert/upsert into user_profiles via Supabase
-    if (supabase && clerkUser) {
-      try {
-        await supabase.from('user_profiles').upsert({
-          clerk_user_id: clerkUser.id,
+    // Create user profile via backend API (handles Supabase insert with proper auth)
+    try {
+      const token = await getToken();
+      await apiClient.post(
+        '/v1/user/onboarding',
+        {
           display_name: trimmedName,
           username: localUsername,
-        });
-      } catch (e) {
-        console.warn('Supabase user_profiles upsert failed (non-blocking):', e);
-      }
+          preferences: {
+            cuisine_preferences: [],
+            ambiance_preferences: [],
+            dietary_restrictions: [],
+            price_range: { min: 1, max: 3 },
+          },
+        },
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+      );
+    } catch (e) {
+      console.warn('Backend profile creation failed (non-blocking):', e);
     }
 
     router.push('/(auth)/find-friends');
@@ -156,7 +168,7 @@ export default function CreateIdentityScreen() {
       case 'available':
         return (
           <View style={styles.statusRow}>
-            <Check size={16} color="#10B981" />
+            <Ionicons name="checkmark" size={16} color="#10B981" />
             <Text style={[styles.statusText, { color: '#10B981' }]}>
               @{localUsername} is available
             </Text>
@@ -165,7 +177,7 @@ export default function CreateIdentityScreen() {
       case 'taken':
         return (
           <View style={styles.statusRow}>
-            <X size={16} color="#EF4444" />
+            <Ionicons name="close" size={16} color="#EF4444" />
             <Text style={[styles.statusText, { color: '#EF4444' }]}>
               @{localUsername} is taken
             </Text>
@@ -203,7 +215,7 @@ export default function CreateIdentityScreen() {
           >
             {/* Back arrow */}
             <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-              <ChevronLeft size={24} color="#1A1A2E" />
+              <Ionicons name="chevron-back" size={24} color="#1A1A2E" />
             </TouchableOpacity>
 
             {/* Heading */}
