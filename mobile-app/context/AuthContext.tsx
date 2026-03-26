@@ -133,7 +133,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [clerkSignOut]);
 
   const updateUser = useCallback((updates: Partial<User>) => {
-    setUser((prev) => (prev ? { ...prev, ...updates } : null));
+    setUser((prev) => {
+      if (prev) return { ...prev, ...updates };
+      // Allow creating a user from scratch (guest mode)
+      return {
+        id: updates.id || 'guest',
+        onboardingComplete: false,
+        ...updates,
+      } as User;
+    });
   }, []);
 
   const handleGetToken = useCallback(
