@@ -1,36 +1,52 @@
 /**
  * Mapai Backend — Clerk Webhook Handler
  * Creates stub user_profiles on user.created, cleans up on user.deleted.
- * Signature verification via CLERK_WEBHOOK_SECRET.
+ * Signature verification via svix + CLERK_WEBHOOK_SECRET.
  */
 
 import { FastifyInstance } from 'fastify';
+import { Webhook } from 'svix';
 import { getSupabase, hasDatabase } from '../db/supabase-client.js';
 
 export async function clerkWebhookRoutes(app: FastifyInstance) {
     app.post('/clerk', {
-        config: {
-            rawBody: true,
-        },
         handler: async (request, reply) => {
             const webhookSecret = process.env.CLERK_WEBHOOK_SECRET;
 
-            // In dev mode without secret, accept all webhooks
-            if (!webhookSecret && process.env.NODE_ENV !== 'production') {
+            let type: string;
+            let data: any;
+
+            if (webhookSecret) {
+                // Verify signature with svix
+                const wh = new Webhook(webhookSecret);
+                try {
+                    const payload = JSON.stringify(request.body);
+                    const event = wh.verify(payload, {
+                        'svix-id': request.headers['svix-id'] as string,
+                        'svix-timestamp': request.headers['svix-timestamp'] as string,
+                        'svix-signature': request.headers['svix-signature'] as string,
+                    }) as any;
+                    type = event.type;
+                    data = event.data;
+                } catch (err) {
+                    console.error('[Webhook] Signature verification failed:', err);
+                    return reply.status(400).send({ error: 'Invalid signature' });
+                }
+            } else if (process.env.NODE_ENV !== 'production') {
+                // Dev mode without secret — accept unverified
                 console.warn('[Webhook] No CLERK_WEBHOOK_SECRET — accepting without verification (dev only)');
-            } else if (!webhookSecret) {
+                const body = request.body as any;
+                type = body?.type;
+                data = body?.data;
+            } else {
                 return reply.status(500).send({ error: 'Webhook secret not configured' });
             }
-
-            // TODO: Add svix signature verification when CLERK_WEBHOOK_SECRET is set
-            // For now, parse the body directly
-            const body = request.body as any;
-            const type = body?.type;
-            const data = body?.data;
 
             if (!type || !data) {
                 return reply.status(400).send({ error: 'Invalid webhook payload' });
             }
+
+            console.log(`[Webhook] Received event: ${type}`);
 
             if (type === 'user.created') {
                 const { id, first_name, last_name, image_url } = data;
@@ -50,7 +66,7 @@ export async function clerkWebhookRoutes(app: FastifyInstance) {
                             },
                             { onConflict: 'clerk_user_id' }
                         );
-                        console.log(`[Webhook] Created stub profile for ${id}`);
+                        console.log(`[Webhook] Created stub profile for ${id}: ${displayName}`);
                     } catch (err) {
                         console.error(`[Webhook] Failed to create profile for ${id}:`, err);
                     }
@@ -69,6 +85,8 @@ export async function clerkWebhookRoutes(app: FastifyInstance) {
                     } catch (err) {
                         console.error(`[Webhook] Failed to delete profile for ${id}:`, err);
                     }
+                } else {
+                    console.log(`[Webhook/Mock] Would delete profile for ${id}`);
                 }
             }
 

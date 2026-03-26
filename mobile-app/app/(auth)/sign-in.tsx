@@ -1,6 +1,10 @@
 /**
  * Mapai — Sign In Screen
  * Full-screen hero image with auth buttons on white card at bottom.
+ *
+ * OAuth strategy:
+ * - Native (iOS/Android): useOAuth from @clerk/clerk-expo + expo-web-browser
+ * - Web: useSignIn with authenticateWithRedirect (useOAuth doesn't work on web)
  */
 
 import React, { useState } from 'react';
@@ -25,22 +29,36 @@ WebBrowser.maybeCompleteAuthSession();
 
 // Clerk imports — wrapped safely
 let useOAuth: any = null;
+let useSignIn: any = null;
 try {
   const clerk = require('@clerk/clerk-expo');
   useOAuth = clerk.useOAuth;
+  useSignIn = clerk.useSignIn;
 } catch {}
 
-const ENABLED_STRATEGIES = ['oauth_google'];
-
 function useClerkOAuth(strategy: string) {
-  const isEnabled = ENABLED_STRATEGIES.includes(strategy);
-  if (!useOAuth || !isEnabled) return { startOAuthFlow: null };
-  // eslint-disable-next-line react-hooks/rules-of-hooks
-  return useOAuth({ strategy });
+  if (!useOAuth) return { startOAuthFlow: null };
+  try {
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    return useOAuth({ strategy });
+  } catch {
+    return { startOAuthFlow: null };
+  }
+}
+
+function useClerkSignIn() {
+  if (!useSignIn) return { signIn: null, setActive: null, isLoaded: false };
+  try {
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    return useSignIn();
+  } catch {
+    return { signIn: null, setActive: null, isLoaded: false };
+  }
 }
 
 const { width: W, height: H } = Dimensions.get('window');
 const NAVY = '#1D3E91';
+const IS_WEB = Platform.OS === 'web';
 
 export default function SignInScreen() {
   const router = useRouter();
@@ -48,34 +66,53 @@ export default function SignInScreen() {
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Native OAuth flow
   const { startOAuthFlow: startGoogle } = useClerkOAuth('oauth_google');
+  // Web sign-in flow
+  const { signIn, setActive: setActiveSession, isLoaded: signInLoaded } = useClerkSignIn();
 
   async function handleGoogleSignIn() {
-    if (!startGoogle) {
-      setError('Google sign-in is not available.');
-      return;
-    }
     setLoading('google');
     setError(null);
+
     try {
+      if (IS_WEB) {
+        // Web: use Clerk's redirect-based OAuth
+        if (!signIn || !signInLoaded) {
+          setError('Sign-in not ready. Please refresh and try again.');
+          return;
+        }
+        await signIn.authenticateWithRedirect({
+          strategy: 'oauth_google',
+          redirectUrl: window.location.origin + '/sso-callback',
+          redirectUrlComplete: window.location.origin + '/',
+        });
+        // Browser will redirect — no further code runs
+        return;
+      }
+
+      // Native: use expo-web-browser OAuth
+      if (!startGoogle) {
+        setError('Google sign-in is not available.');
+        return;
+      }
       const { createdSessionId, setActive } = await startGoogle({
-        redirectUrl: Linking.createURL('/', { scheme: 'mapai' }),
+        redirectUrl: Linking.createURL('/oauth-native-callback'),
       });
       if (createdSessionId && setActive) {
         await setActive({ session: createdSessionId });
-        // DO NOT navigate here — the root layout route guard will
-        // detect isSignedIn=true and route to create-identity or home
-        // depending on publicMetadata.onboardingCompleted.
+        // Route guard in AuthContext handles navigation
       }
     } catch (e: any) {
-      setError(e.message ?? 'Sign-in failed.');
+      console.error('[SignIn] Google OAuth error:', e);
+      const msg = e?.errors?.[0]?.longMessage || e?.message || 'Sign-in failed.';
+      setError(msg);
     } finally {
       setLoading(null);
     }
   }
 
   function handleGuestSignIn() {
-    // Set a guest user so the route guard doesn't bounce us back to landing
     updateUser({
       id: 'guest-user',
       displayName: '',
@@ -113,7 +150,6 @@ export default function SignInScreen() {
 
         {error && <Text style={s.errorText}>{error}</Text>}
 
-        {/* Google */}
         <TouchableOpacity
           style={s.googleBtn}
           onPress={handleGoogleSignIn}
@@ -130,7 +166,6 @@ export default function SignInScreen() {
           )}
         </TouchableOpacity>
 
-        {/* Guest (dev) */}
         <TouchableOpacity style={s.guestBtn} onPress={handleGuestSignIn} disabled={loading !== null}>
           <Text style={s.guestText}>Continue as Guest</Text>
         </TouchableOpacity>

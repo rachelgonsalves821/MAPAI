@@ -80,6 +80,7 @@ export default function RootLayout() {
           <StatusBar style="dark" />
           <Stack screenOptions={{ headerShown: false }}>
             <Stack.Screen name="(auth)" options={{ animation: 'none' }} />
+            <Stack.Screen name="sso-callback" options={{ animation: 'none' }} />
             <Stack.Screen name="home" options={{ animation: 'none' }} />
             <Stack.Screen
               name="chat"
