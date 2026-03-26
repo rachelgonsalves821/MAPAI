@@ -59,10 +59,14 @@ export default function SignInScreen() {
     setError(null);
     try {
       const { createdSessionId, setActive } = await startGoogle({
-        redirectUrl: Linking.createURL('/(auth)/create-identity', { scheme: 'mapai' }),
+        redirectUrl: Linking.createURL('/', { scheme: 'mapai' }),
       });
-      if (createdSessionId && setActive) await setActive({ session: createdSessionId });
-      router.push('/(auth)/create-identity');
+      if (createdSessionId && setActive) {
+        await setActive({ session: createdSessionId });
+        // DO NOT navigate here — the root layout route guard will
+        // detect isSignedIn=true and route to create-identity or home
+        // depending on publicMetadata.onboardingCompleted.
+      }
     } catch (e: any) {
       setError(e.message ?? 'Sign-in failed.');
     } finally {

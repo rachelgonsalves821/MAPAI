@@ -22,6 +22,7 @@ import { reviewRoutes } from './routes/reviews.js';
 import { friendRoutes } from './routes/friends.js';
 import { usersSearchRoutes } from './routes/users-search.js';
 import { chatHistoryRoutes } from './routes/chat-history.js';
+import { clerkWebhookRoutes } from './routes/webhooks-clerk.js';
 
 async function main() {
     // Validate config
@@ -78,6 +79,7 @@ async function main() {
     await app.register(friendRoutes, { prefix: '/v1/friends' });
     await app.register(usersSearchRoutes, { prefix: '/v1/users' });
     await app.register(chatHistoryRoutes, { prefix: '/v1/chat/history' });
+    await app.register(clerkWebhookRoutes, { prefix: '/v1/webhooks' });
 
     // Global error handler
     app.setErrorHandler((error: any, _request, reply) => {

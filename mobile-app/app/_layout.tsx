@@ -11,6 +11,7 @@ import { useEffect } from 'react';
 import { AuthProvider } from '@/context/AuthContext';
 import { useOnboardingStore } from '@/store/onboardingStore';
 import { LocationService } from '@/services/LocationService';
+import { useOnboardingMigration } from '@/hooks/useOnboardingMigration';
 
 // Clerk — wrapped for web dev compatibility
 let ClerkProvider: any;
@@ -58,6 +59,12 @@ SplashScreen.preventAutoHideAsync();
 
 const CLERK_KEY = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY || '';
 
+/** Runs migration hooks inside the AuthProvider context */
+function MigrationRunner() {
+  useOnboardingMigration();
+  return null;
+}
+
 export default function RootLayout() {
   useEffect(() => {
     useOnboardingStore.getState().loadFromStorage();
@@ -69,6 +76,7 @@ export default function RootLayout() {
     <ClerkProvider publishableKey={CLERK_KEY} tokenCache={tokenCache}>
       <ClerkLoaded>
         <AuthProvider>
+          <MigrationRunner />
           <StatusBar style="dark" />
           <Stack screenOptions={{ headerShown: false }}>
             <Stack.Screen name="(auth)" options={{ animation: 'none' }} />
@@ -84,6 +92,13 @@ export default function RootLayout() {
             <Stack.Screen
               name="profile"
               options={{ animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="chat-history"
+              options={{
+                animation: 'slide_from_right',
+                presentation: 'modal',
+              }}
             />
             <Stack.Screen
               name="place/[id]"
@@ -121,10 +136,6 @@ export default function RootLayout() {
                 animation: 'slide_from_bottom',
                 presentation: 'modal',
               }}
-            />
-            <Stack.Screen
-              name="settings/mfa"
-              options={{ animation: 'slide_from_right' }}
             />
           </Stack>
         </AuthProvider>

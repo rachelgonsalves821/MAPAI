@@ -117,6 +117,102 @@
 
 ---
 
+> Session: 2026-03-25 (overnight) — Onboarding Loop Fix
+
+## Bug Description
+After a user creates a Clerk account and completes sign-in, the app re-triggers
+the onboarding flow instead of navigating to the map/chat interface. Users stuck
+in an onboarding loop despite having an account.
+
+## Root Causes Found (5 compounding issues)
+
+### RC1: onboardingComplete never persisted across app restarts
+AuthContext line 65 hardcoded `onboardingComplete: false` on every Clerk user sync.
+The `updateUser({ onboardingComplete: true })` call in ready.tsx only set React state
+which was lost on app restart.
+
+### RC2: checkOnboardingStatus depended on backend availability
+The async fetch to `/v1/user/profile` at AuthContext line 80-106 could fail silently
+(backend down, token null, network error), defaulting to `onboardingComplete: false`.
+
+### RC3: Sign-in callback navigated AND route guard navigated
+sign-in.tsx line 65 did `router.push('/(auth)/create-identity')` after OAuth, but
+the route guard in AuthContext also fired on `isSignedIn` change — competing events.
+
+### RC4: Guest mode user was overwritten by Clerk sync
+Guest set `user = { id: 'guest', onboardingComplete: false }` but the Clerk sync
+effect immediately saw `isSignedIn: false` and set `user = null` → bounced to landing.
+
+### RC5: No publicMetadata check
+Clerk user's `publicMetadata` was never read. Routing depended entirely on async DB call.
+
+## Fixes Applied
+
+### Fix 1: Clerk publicMetadata as source of truth for routing
+- Ready screen now sets `clerkUser.publicMetadata.onboardingCompleted = true` as the
+  PRIMARY persistence mechanism (before backend call)
+- AuthContext reads `clerkUser.publicMetadata.onboardingCompleted` synchronously —
+  no DB call needed for routing decisions
+
+### Fix 2: AuthContext rewritten — synchronous routing
+- Removed `checkOnboardingStatus` from routing path entirely
+- Added `hasNavigated` ref to prevent duplicate navigation from re-renders
+- Guest users now persisted to AsyncStorage (survive app restart)
+- Route guard is fully synchronous once Clerk is loaded
+
+### Fix 3: Removed post-OAuth navigation from sign-in
+- `router.push('/(auth)/create-identity')` removed from Google OAuth callback
+- redirectUrl changed from `/(auth)/create-identity` to `/`
+- Root layout route guard handles all post-auth routing
+
+### Fix 4: Migration hook for existing users
+- Created `hooks/useOnboardingMigration.ts` — syncs `is_onboarded` from Supabase
+  to Clerk `publicMetadata` for users who completed onboarding before this fix
+- Runs once per app load, no-ops if Clerk metadata already set
+
+### Fix 5: Removed rogue auth redirects
+- profile.tsx had `router.replace('/(auth)/sign-in')` in sign-out and delete handlers
+- Replaced with comment — route guard handles redirect after `signOut()` clears user
+
+### Fix 6: Clerk webhook for automatic profile stub
+- Created backend POST /v1/webhooks/clerk for `user.created` and `user.deleted`
+- Ensures user_profiles row exists even if Create Identity screen insert fails
+
+### Fix 7: Clerk TypeScript types
+- Created types/clerk.d.ts extending UserPublicMetadata with onboardingCompleted
+
+## Summary
+
+### What the routing logic now does
+1. App loads → ClerkProvider initializes → `isLoaded: true`
+2. AuthContext reads `clerkUser.publicMetadata.onboardingCompleted` (SYNCHRONOUS)
+3. If true → route to `/home`
+4. If false → route to `/(auth)/create-identity`
+5. If no user → route to `/(auth)/landing`
+6. NO async DB call in the routing path
+
+### What still needs manual setup
+- [ ] Clerk Dashboard: create webhook endpoint → POST /v1/webhooks/clerk
+      Events: user.created, user.deleted
+- [ ] Set CLERK_WEBHOOK_SECRET in backend .env
+- [ ] Test: create new account → complete onboarding → close app → reopen → should go to map
+- [ ] Test: existing user signs in → should go directly to map
+- [ ] Test: sign out → sign back in → should go to map (not onboarding)
+
+### Files modified
+- mobile-app/context/AuthContext.tsx — complete rewrite
+- mobile-app/app/(auth)/ready.tsx — Clerk publicMetadata update
+- mobile-app/app/(auth)/sign-in.tsx — removed post-OAuth navigation
+- mobile-app/app/_layout.tsx — added MigrationRunner
+- mobile-app/app/profile.tsx — removed rogue auth redirects
+- mobile-app/hooks/useOnboardingMigration.ts — NEW
+- mobile-app/types/clerk.d.ts — NEW
+- backend/src/routes/webhooks-clerk.ts — NEW
+- backend/src/server.ts — registered webhook route
+- _overnight_decisions.md — this log
+
+---
+
 > Session: 2026-03-25 — Clerk Auth Migration, 2FA, Social Onboarding
 
 ## Decision: Migrated auth from Supabase Auth to Clerk
@@ -316,3 +412,18 @@
 ## Decision: Completion screen backend save is fire-and-forget
 - POST to `/v1/user/onboarding` failure doesn't block user from entering app
 - **Why**: Same pattern as previous implementation. UX > persistence on first run.
+
+---
+
+> Session: 2026-03-26 — Chat Memory & Conversation History
+
+## What was built
+1. `mobile-app/store/chatStore.ts` — Zustand store for sessions, messages, loading state
+2. `mobile-app/app/chat-history.tsx` — Full history screen with date-grouped sessions
+3. Updated `ChatThread.tsx` — Persists messages via backend, creates sessions, 30-min stale boundary
+4. Updated `CollapsedChatBar.tsx` — History icon (clock) opens chat-history screen
+5. Registered `chat-history` route in `_layout.tsx`
+
+## Decision: 30-minute stale session threshold
+## Decision: Fire-and-forget message persistence
+## Decision: Did NOT rewrite backend (already complete)

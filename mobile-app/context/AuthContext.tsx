@@ -1,11 +1,15 @@
 /**
  * Mapai — Auth Context (Clerk)
- * Provides user state, onboarding check, and route guarding.
- * Clerk handles OAuth sessions; Supabase is data-only via Clerk JWT bridge.
+ *
+ * Routing logic uses Clerk's publicMetadata.onboardingCompleted —
+ * this is SYNCHRONOUS once Clerk loads, no DB call needed.
+ *
+ * Guest mode sets a local user object that bypasses Clerk entirely.
  */
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter, useSegments } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Clerk imports — wrapped for web/dev compatibility
 let useClerkAuth: any;
@@ -15,7 +19,6 @@ try {
   useClerkAuth = clerk.useAuth;
   useClerkUser = clerk.useUser;
 } catch {
-  // Clerk not available (web dev, SSR) — use stubs
   useClerkAuth = () => ({ isSignedIn: false, isLoaded: true, signOut: async () => {}, getToken: async () => null });
   useClerkUser = () => ({ user: null, isLoaded: true });
 }
@@ -27,6 +30,7 @@ interface User {
   username?: string;
   avatarUrl?: string;
   onboardingComplete: boolean;
+  isGuest?: boolean;
 }
 
 interface AuthContextType {
@@ -35,11 +39,13 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   updateUser: (updates: Partial<User>) => void;
   getToken: (options?: { template?: string }) => Promise<string | null>;
+  /** Direct access to Clerk user object for publicMetadata updates */
+  clerkUser: any;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const IS_DEV = process.env.NODE_ENV !== 'production';
+const GUEST_STORAGE_KEY = 'mapai_guest_user';
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const { isSignedIn, isLoaded: authLoaded, signOut: clerkSignOut, getToken } = useClerkAuth();
@@ -47,100 +53,105 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [onboardingChecked, setOnboardingChecked] = useState(false);
   const router = useRouter();
   const segments = useSegments();
+  const hasNavigated = useRef(false);
 
-  // Sync Clerk user → local user state
+  // Reset navigation flag when auth state changes fundamentally
+  useEffect(() => {
+    hasNavigated.current = false;
+  }, [isSignedIn]);
+
+  // ─── Sync Clerk user → local state (NO async DB call) ───
   useEffect(() => {
     if (!authLoaded || !userLoaded) return;
 
     if (isSignedIn && clerkUser) {
-      const mapped: User = {
+      // Read onboarding status from Clerk publicMetadata — SYNCHRONOUS
+      const onboardingComplete = clerkUser.publicMetadata?.onboardingCompleted === true;
+
+      setUser({
         id: clerkUser.id,
         email: clerkUser.primaryEmailAddress?.emailAddress,
         displayName: clerkUser.fullName ?? clerkUser.firstName ?? undefined,
         username: clerkUser.username ?? undefined,
         avatarUrl: clerkUser.imageUrl,
-        onboardingComplete: false, // Will be checked below
-      };
-      setUser(mapped);
-      checkOnboardingStatus(clerkUser.id, mapped);
-    } else {
-      // Dev guest mode
-      if (IS_DEV && !isSignedIn) {
-        // Don't auto-set dev user — wait for explicit guest sign-in
-      }
-      setUser(null);
-      setOnboardingChecked(true);
+        onboardingComplete,
+        isGuest: false,
+      });
       setIsLoading(false);
+    } else {
+      // Not signed in with Clerk — check for guest user
+      loadGuestUser();
     }
-  }, [isSignedIn, authLoaded, userLoaded, clerkUser?.id]);
+  }, [isSignedIn, authLoaded, userLoaded, clerkUser?.id, clerkUser?.publicMetadata?.onboardingCompleted]);
 
-  async function checkOnboardingStatus(clerkUserId: string, mappedUser: User) {
+  async function loadGuestUser() {
     try {
-      // Try fetching profile from backend
-      const token = await getToken();
-      if (token) {
-        const backendUrl = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:3001';
-        const res = await fetch(`${backendUrl}/v1/user/profile`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          const profile = data.data;
-          if (profile) {
-            mappedUser.onboardingComplete = profile.is_onboarded ?? profile.onboarding_complete ?? false;
-            mappedUser.displayName = profile.display_name ?? mappedUser.displayName;
-            mappedUser.username = profile.username ?? mappedUser.username;
-          }
-        }
+      const stored = await AsyncStorage.getItem(GUEST_STORAGE_KEY);
+      if (stored) {
+        setUser(JSON.parse(stored));
+      } else {
+        setUser(null);
       }
     } catch {
-      // Backend unavailable — assume not onboarded
+      setUser(null);
     }
-
-    setUser({ ...mappedUser });
-    setOnboardingChecked(true);
     setIsLoading(false);
   }
 
-  // Route guard
+  // ─── Route guard — SYNCHRONOUS, no DB calls ───
   useEffect(() => {
-    if (isLoading || !onboardingChecked) return;
+    if (isLoading) return;
+    if (hasNavigated.current) return;
 
     const inAuthGroup = segments[0] === '(auth)';
 
     if (!user) {
+      // No user → go to landing
       if (!inAuthGroup) {
         router.replace('/(auth)/landing');
+        hasNavigated.current = true;
       }
     } else if (!user.onboardingComplete) {
-      // Signed in but not onboarded — allow auth flow screens
+      // User exists but not onboarded → allow auth flow screens
       if (!inAuthGroup) {
         router.replace('/(auth)/create-identity');
+        hasNavigated.current = true;
       }
-    } else if (user.onboardingComplete && inAuthGroup) {
-      router.replace('/home');
+    } else if (user.onboardingComplete) {
+      // Onboarded → go to home (only redirect if in auth group)
+      if (inAuthGroup) {
+        router.replace('/home');
+        hasNavigated.current = true;
+      }
     }
-  }, [user, segments, isLoading, onboardingChecked]);
+  }, [user, segments, isLoading]);
 
   const handleSignOut = useCallback(async () => {
     try {
       await clerkSignOut();
     } catch {}
+    await AsyncStorage.removeItem(GUEST_STORAGE_KEY);
     setUser(null);
+    hasNavigated.current = false;
   }, [clerkSignOut]);
 
   const updateUser = useCallback((updates: Partial<User>) => {
     setUser((prev) => {
-      if (prev) return { ...prev, ...updates };
-      // Allow creating a user from scratch (guest mode)
-      return {
-        id: updates.id || 'guest',
-        onboardingComplete: false,
-        ...updates,
-      } as User;
+      const updated = prev
+        ? { ...prev, ...updates }
+        : { id: updates.id || 'guest', onboardingComplete: false, isGuest: true, ...updates } as User;
+
+      // Persist guest users to AsyncStorage
+      if (updated.isGuest) {
+        AsyncStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(updated)).catch(() => {});
+      }
+
+      // Reset navigation flag so route guard re-evaluates
+      hasNavigated.current = false;
+
+      return updated;
     });
   }, []);
 
@@ -163,6 +174,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signOut: handleSignOut,
         updateUser,
         getToken: handleGetToken,
+        clerkUser,
       }}
     >
       {children}
@@ -179,6 +191,7 @@ export function useAuth() {
       signOut: async () => {},
       updateUser: () => {},
       getToken: async () => null,
+      clerkUser: null,
     } as AuthContextType;
   }
   return context;
