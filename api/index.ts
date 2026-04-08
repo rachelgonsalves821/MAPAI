@@ -5,13 +5,13 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'http';
+import { buildApp } from '../backend/src/server.js';
 
 let handler: ((req: IncomingMessage, res: ServerResponse) => void) | null = null;
 
 async function getHandler() {
     if (handler) return handler;
 
-    const { buildApp } = await import('../backend/src/server.js');
     const app = await buildApp();
     await app.ready();
 
