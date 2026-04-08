@@ -1,4 +1,5 @@
 {
+  "installCommand": "cd mobile-app && npm install && cd ../backend && npm install",
   "buildCommand": "cd mobile-app && npx expo export --platform web",
   "outputDirectory": "mobile-app/dist",
   "functions": {
