@@ -4,9 +4,13 @@
  * Handles the token exchange and session activation.
  */
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
+
+// CRITICAL: Close the in-app browser on redirect (matches sign-in.tsx)
+WebBrowser.maybeCompleteAuthSession();
 
 let useSignUp: any = null;
 let useSignIn: any = null;
@@ -16,43 +20,68 @@ try {
   useSignIn = clerk.useSignIn;
 } catch {}
 
+const MAX_RETRIES = 10;
+const RETRY_INTERVAL = 500; // ms
+
 export default function SSOCallbackScreen() {
   const router = useRouter();
+  const handled = useRef(false);
 
   const signUpHook = useSignUp ? useSignUp() : { signUp: null, setActive: null, isLoaded: false };
   const signInHook = useSignIn ? useSignIn() : { signIn: null, setActive: null, isLoaded: false };
 
   useEffect(() => {
-    async function handleCallback() {
+    if (!signInHook.isLoaded && !signUpHook.isLoaded) return;
+    if (handled.current) return;
+
+    let retries = 0;
+
+    async function tryActivateSession(): Promise<boolean> {
+      // Check signUp completion (new user)
+      if (signUpHook.signUp?.status === 'complete' && signUpHook.signUp.createdSessionId) {
+        await signUpHook.setActive({ session: signUpHook.signUp.createdSessionId });
+        return true;
+      }
+
+      // Check signIn completion (existing user)
+      if (signInHook.signIn?.status === 'complete' && signInHook.signIn.createdSessionId) {
+        await signInHook.setActive({ session: signInHook.signIn.createdSessionId });
+        return true;
+      }
+
+      return false;
+    }
+
+    async function poll() {
       try {
-        // Check if we have a signUp that needs completion
-        if (signUpHook.signUp?.status === 'complete' && signUpHook.signUp.createdSessionId) {
-          await signUpHook.setActive({ session: signUpHook.signUp.createdSessionId });
-          return; // Route guard handles navigation
+        const activated = await tryActivateSession();
+        if (activated) {
+          handled.current = true;
+          router.replace('/(auth)/create-identity');
+          return;
         }
 
-        // Check if we have a signIn that needs completion
-        if (signInHook.signIn?.status === 'complete' && signInHook.signIn.createdSessionId) {
-          await signInHook.setActive({ session: signInHook.signIn.createdSessionId });
-          return; // Route guard handles navigation
+        retries++;
+        if (retries < MAX_RETRIES) {
+          setTimeout(poll, RETRY_INTERVAL);
+        } else {
+          // Timeout — fall back to create-identity and let route guard sort it out
+          handled.current = true;
+          router.replace('/(auth)/create-identity');
         }
-
-        // If nothing is ready yet, the Clerk provider will handle it
-        // via the onAuthStateChange equivalent
       } catch (err) {
         console.error('[SSO Callback] Error:', err);
+        handled.current = true;
         router.replace('/(auth)/sign-in');
       }
     }
 
-    if (signInHook.isLoaded || signUpHook.isLoaded) {
-      handleCallback();
-    }
-  }, [signInHook.isLoaded, signUpHook.isLoaded]);
+    poll();
+  }, [signInHook.isLoaded, signUpHook.isLoaded, signInHook.signIn?.status, signUpHook.signUp?.status]);
 
   return (
     <View style={styles.container}>
-      <ActivityIndicator size="large" color="#1D3E91" />
+      <ActivityIndicator size="large" color="#0558E8" />
       <Text style={styles.text}>Completing sign in...</Text>
     </View>
   );

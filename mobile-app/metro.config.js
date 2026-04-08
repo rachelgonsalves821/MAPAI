@@ -32,6 +32,12 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
       type: 'sourceFile',
     };
   }
+  if (platform === 'web' && moduleName === 'react-native-map-clustering') {
+    return {
+      filePath: path.resolve(__dirname, 'mocks/react-native-map-clustering.web.tsx'),
+      type: 'sourceFile',
+    };
+  }
   if (platform === 'web' && moduleName === 'react-native-svg') {
     return {
       filePath: path.resolve(__dirname, 'mocks/react-native-svg.web.tsx'),

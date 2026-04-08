@@ -11,6 +11,7 @@ import { envelope, errorResponse } from '../utils/response.js';
 import { AiOrchestrator } from '../services/ai-orchestrator.js';
 import { PlacesService } from '../services/places-service.js';
 import { MemoryService } from '../services/memory-service.js';
+import { ChatService } from '../services/chat-service.js';
 import { config } from '../config.js';
 
 // Request validation
@@ -35,6 +36,7 @@ export async function chatRoutes(app: FastifyInstance) {
     const ai = new AiOrchestrator();
     const places = new PlacesService();
     const memory = new MemoryService();
+    const chat = new ChatService();
 
     /**
      * POST /v1/chat/message
@@ -55,18 +57,41 @@ export async function chatRoutes(app: FastifyInstance) {
 
             try {
                 const t0 = Date.now();
-                console.log(`[Chat] INCOMING: "${message}" from user ${userId}`);
+                request.log.info({ userId, msgLen: message.length }, '[Chat] incoming message');
 
-                // 1. Load user memory/preferences
+                // 1. Resolve or create the chat session so messages are always persisted,
+                //    even if the frontend's fire-and-forget calls fail.
+                let sessionId = session_id;
+                if (!sessionId) {
+                    sessionId = await chat.createSession(userId);
+                    request.log.info({ sessionId }, '[Chat] new session created');
+                }
+
+                // 2. Persist the user message BEFORE calling the LLM.
+                //    This guarantees the message is saved even if the LLM call fails.
+                try {
+                    await chat.saveMessage({
+                        sessionId,
+                        clerkUserId: userId,
+                        role: 'user',
+                        content: message,
+                    });
+                } catch (persistErr: any) {
+                    // Non-fatal: log but don't block the LLM call
+                    console.warn(`[Chat] Failed to persist user message: ${persistErr.message}`);
+                }
+
+                // 3. Load user memory/preferences
                 const userMemory = await memory.getUserContext(userId);
                 const tMemory = Date.now();
-                console.log(`[Chat] Memory loaded in ${tMemory - t0}ms for user ${userId}`);
+                request.log.info({ memoryMs: tMemory - t0 }, '[Chat] memory loaded');
 
-                // 2. Send to AI orchestrator
+                // 4. Send to AI orchestrator (history loading is now handled by orchestrator
+                //    via ChatService.getSessionHistory, which reads from chat_messages)
                 const aiResponse = await ai.chat({
                     message,
                     userId,
-                    sessionId: session_id,
+                    sessionId,
                     userMemory,
                     location: location
                         ? { latitude: location.lat, longitude: location.lng }
@@ -74,9 +99,21 @@ export async function chatRoutes(app: FastifyInstance) {
                     context,
                 });
                 const tAi = Date.now();
-                console.log(`[Chat] AI responded in ${tAi - tMemory}ms — searchQuery: ${aiResponse.searchQuery ? `"${aiResponse.searchQuery}"` : '(none)'}`);
+                request.log.info({ aiMs: tAi - tMemory, hasSearch: !!aiResponse.searchQuery }, '[Chat] AI responded');
 
-                // 3. If AI detected a discovery intent, fetch real places
+                // 5. Persist the assistant response.
+                try {
+                    await chat.saveMessage({
+                        sessionId,
+                        clerkUserId: userId,
+                        role: 'assistant',
+                        content: aiResponse.text,
+                    });
+                } catch (persistErr: any) {
+                    console.warn(`[Chat] Failed to persist assistant message: ${persistErr.message}`);
+                }
+
+                // 6. If AI detected a discovery intent, fetch real places
                 let placeResults: any[] = [];
                 if (aiResponse.searchQuery) {
                     if (!config.google.placesApiKey) {
@@ -90,11 +127,11 @@ export async function chatRoutes(app: FastifyInstance) {
                             userMemory,
                         });
                         const tPlaces = Date.now();
-                        console.log(`[Chat] Places search returned ${placeResults.length} results in ${tPlaces - tAi}ms`);
+                        request.log.info({ placeCount: placeResults.length, placesMs: tPlaces - tAi }, '[Chat] places search complete');
                     }
                 }
 
-                // 4. Extract preference insights from conversation and save
+                // 7. Extract preference insights from conversation and save
                 if (aiResponse.preferenceInsights && aiResponse.preferenceInsights.length > 0) {
                     await memory.learnFromInsights(userId, aiResponse.preferenceInsights);
                 }
@@ -105,14 +142,15 @@ export async function chatRoutes(app: FastifyInstance) {
                     : aiResponse.text
                         ? 'conversational'
                         : 'error';
-                console.log(`[Chat] Total request time: ${totalMs}ms — type: ${responseType}, places: ${placeResults.length}`);
+                request.log.info({ totalMs, responseType, placeCount: placeResults.length, sessionId }, '[Chat] request complete');
 
                 return envelope({
                     type: responseType,
                     reply: aiResponse.text,
                     places: placeResults,
                     intent: aiResponse.discoveryIntent || null,
-                    session_id: aiResponse.sessionId,
+                    // Always return the resolved sessionId so the client can store it
+                    session_id: sessionId,
                 });
             } catch (err: any) {
                 console.error('[Chat] CHAT ERROR:', err);

@@ -32,14 +32,17 @@ export async function clerkWebhookRoutes(app: FastifyInstance) {
                     console.error('[Webhook] Signature verification failed:', err);
                     return reply.status(400).send({ error: 'Invalid signature' });
                 }
-            } else if (process.env.NODE_ENV !== 'production') {
-                // Dev mode without secret — accept unverified
-                console.warn('[Webhook] No CLERK_WEBHOOK_SECRET — accepting without verification (dev only)');
+            } else if (process.env.NODE_ENV === 'development') {
+                // Permissive skip: only in exact 'development' — staging and test
+                // environments still require a valid signature.
+                console.warn('[Webhook] No CLERK_WEBHOOK_SECRET — accepting without verification (development only)');
                 const body = request.body as any;
                 type = body?.type;
                 data = body?.data;
             } else {
-                return reply.status(500).send({ error: 'Webhook secret not configured' });
+                // Production, staging, test — CLERK_WEBHOOK_SECRET is mandatory.
+                console.error('[Webhook] CLERK_WEBHOOK_SECRET is not configured. Cannot process webhooks safely.');
+                return reply.status(500).send({ error: 'Webhook secret not configured — contact the platform team' });
             }
 
             if (!type || !data) {

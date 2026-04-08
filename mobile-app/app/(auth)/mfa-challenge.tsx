@@ -14,11 +14,19 @@ import {
   KeyboardAvoidingView,
   ScrollView,
   Platform,
+  ActivityIndicator,
   NativeSyntheticEvent,
   TextInputKeyPressEventData,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+
+// Clerk — wrapped for web dev compatibility (mirrors sign-in.tsx pattern)
+let clerkUseSignIn: any = null;
+try {
+  const clerk = require('@clerk/clerk-expo');
+  clerkUseSignIn = clerk.useSignIn;
+} catch {}
 
 const CODE_LENGTH = 6;
 
@@ -28,7 +36,13 @@ export default function MfaChallengeScreen() {
   const [useBackupCode, setUseBackupCode] = useState(false);
   const [backupCode, setBackupCode] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [verifying, setVerifying] = useState(false);
   const inputRefs = useRef<(TextInput | null)[]>([]);
+
+  // Clerk hooks — called unconditionally (React rules of hooks)
+  const signInHook = clerkUseSignIn
+    ? clerkUseSignIn()
+    : { signIn: null, setActive: null, isLoaded: false };
 
   const handleDigitChange = useCallback((text: string, index: number) => {
     // Accept only the last character typed (handles paste as single char)
@@ -57,29 +71,83 @@ export default function MfaChallengeScreen() {
   );
 
   async function handleVerify() {
+    if (!signInHook.isLoaded || !signInHook.signIn) return;
     const fullCode = code.join('');
-    if (fullCode.length < CODE_LENGTH) {
+    if (fullCode.length !== CODE_LENGTH) {
       setError('Please enter the full 6-digit code.');
       return;
     }
-    // TODO: wire to Clerk MFA verification
-    // const { signIn } = useSignIn();
-    // await signIn.attemptSecondFactor({ strategy: 'totp', code: fullCode });
-    console.log('MFA code submitted:', fullCode);
-    router.push('/(auth)/create-identity');
+
+    setVerifying(true);
+    setError('');
+    try {
+      const result = await signInHook.signIn.attemptSecondFactor({
+        strategy: 'totp',
+        code: fullCode,
+      });
+
+      if (result.status === 'complete') {
+        await signInHook.setActive({ session: result.createdSessionId });
+        router.replace('/(tabs)');
+      } else {
+        setError('Verification incomplete. Please try again.');
+      }
+    } catch (err: any) {
+      const clerkError = err?.errors?.[0];
+      if (clerkError?.code === 'form_code_incorrect') {
+        setError('Invalid code. Please try again.');
+      } else if (clerkError?.code === 'verification_expired') {
+        setError('Code expired. Please generate a new one.');
+      } else {
+        setError(clerkError?.message || 'Verification failed. Please try again.');
+      }
+      // Clear code inputs and refocus first box on error
+      setCode(['', '', '', '', '', '']);
+      inputRefs.current[0]?.focus();
+    } finally {
+      setVerifying(false);
+    }
   }
 
   async function handleBackupVerify() {
+    if (!signInHook.isLoaded || !signInHook.signIn) return;
     if (!backupCode.trim()) {
       setError('Please enter your backup code.');
       return;
     }
-    // TODO: wire to Clerk backup code verification
-    console.log('Backup code submitted:', backupCode.trim());
-    router.push('/(auth)/create-identity');
+
+    setVerifying(true);
+    setError('');
+    try {
+      const result = await signInHook.signIn.attemptSecondFactor({
+        strategy: 'backup_code',
+        code: backupCode.trim(),
+      });
+
+      if (result.status === 'complete') {
+        await signInHook.setActive({ session: result.createdSessionId });
+        router.replace('/(tabs)');
+      } else {
+        setError('Verification incomplete. Please try again.');
+      }
+    } catch (err: any) {
+      const clerkError = err?.errors?.[0];
+      setError(clerkError?.message || 'Invalid backup code. Please try again.');
+    } finally {
+      setVerifying(false);
+    }
   }
 
   const isCodeComplete = code.every((d) => d !== '');
+
+  // Show loading state while Clerk initialises
+  if (!signInHook.isLoaded) {
+    return (
+      <SafeAreaView style={[styles.container, { alignItems: 'center', justifyContent: 'center' }]}>
+        <ActivityIndicator size="large" color="#0558E8" />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -151,20 +219,24 @@ export default function MfaChallengeScreen() {
           <TouchableOpacity
             style={[
               styles.verifyButton,
-              (!isCodeComplete && !useBackupCode) && styles.verifyButtonDisabled,
+              ((!isCodeComplete && !useBackupCode) || verifying) && styles.verifyButtonDisabled,
             ]}
             onPress={useBackupCode ? handleBackupVerify : handleVerify}
-            disabled={!useBackupCode && !isCodeComplete}
+            disabled={(!useBackupCode && !isCodeComplete) || verifying}
             activeOpacity={0.85}
           >
-            <Text
-              style={[
-                styles.verifyButtonText,
-                (!isCodeComplete && !useBackupCode) && styles.verifyButtonTextDisabled,
-              ]}
-            >
-              Verify
-            </Text>
+            {verifying ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Text
+                style={[
+                  styles.verifyButtonText,
+                  (!isCodeComplete && !useBackupCode) && styles.verifyButtonTextDisabled,
+                ]}
+              >
+                Verify
+              </Text>
+            )}
           </TouchableOpacity>
 
           {/* Toggle backup code */}
@@ -244,7 +316,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FAFAFA',
   },
   codeBoxFilled: {
-    borderColor: '#1D3E91',
+    borderColor: '#0558E8',
     backgroundColor: '#FFFFFF',
   },
   backupInputWrap: {
@@ -263,7 +335,7 @@ const styles = StyleSheet.create({
   verifyButton: {
     height: 56,
     borderRadius: 999,
-    backgroundColor: '#1D3E91',
+    backgroundColor: '#0558E8',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 20,
@@ -285,7 +357,7 @@ const styles = StyleSheet.create({
   },
   backupToggleText: {
     fontSize: 14,
-    color: '#1D3E91',
+    color: '#0558E8',
     fontWeight: '500',
   },
 });

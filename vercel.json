@@ -1,0 +1,13 @@
+{
+  "buildCommand": "cd mobile-app && npx expo export --platform web",
+  "outputDirectory": "mobile-app/dist",
+  "functions": {
+    "api/index.ts": {
+      "includeFiles": "backend/src/**"
+    }
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/index.ts" },
+    { "source": "/(.*)", "destination": "/" }
+  ]
+}

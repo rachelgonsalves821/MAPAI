@@ -22,7 +22,13 @@
         "buildType": "apk"
       },
       "env": {
-        "APP_ENV": "staging"
+        "APP_ENV": "staging",
+        "EXPO_PUBLIC_BACKEND_URL": "https://mapai-api.fly.dev",
+        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_Z3JhbmQtcmVwdGlsZS0yMy5jbGVyay5hY2NvdW50cy5kZXYk",
+        "EXPO_PUBLIC_GOOGLE_PLACES_API_KEY": "AIzaSyBflQIEZtLzpcDEAQINd7szeZ-20PrtG7c",
+        "EXPO_PUBLIC_GOOGLE_MAPS_SDK_KEY": "AIzaSyBflQIEZtLzpcDEAQINd7szeZ-20PrtG7c",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://zsrnaxzkjsitwjdcelob.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_unI2OSPos5-wPpecPlAJlA_9O9nbELS"
       }
     },
     "production": {
@@ -34,11 +40,18 @@
     }
   },
   "submit": {
+    "staging": {
+      "ios": {
+        "appleId": "rachelgonsalves821@icloud.com",
+        "ascAppId": "6761392245",
+        "appleTeamId": "N2WJUY9FXA"
+      }
+    },
     "production": {
       "ios": {
-        "appleId": "your-apple-id@example.com",
-        "ascAppId": "your-asc-app-id",
-        "appleTeamId": "YOUR_TEAM_ID"
+        "appleId": "rachelgonsalves821@icloud.com",
+        "ascAppId": "6761392245",
+        "appleTeamId": "N2WJUY9FXA"
       },
       "android": {
         "serviceAccountKeyPath": "./google-services.json",

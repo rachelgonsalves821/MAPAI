@@ -11,7 +11,7 @@ export const Colors = {
     surfaceBorder: 'rgba(0,0,0,0.08)',
 
     // Brand colors
-    brandBlue: '#1D3E91',         // Navy (Primary)
+    brandBlue: '#0558E8',         // Electric Blue (Primary)
     brandViolet: '#7C3AED',       // AI Violet
     brandVioletLight: '#F0F6FF',  // Mist (AI Bubble BG)
     accent: '#BBCFF7',            // Light blue accent
@@ -28,7 +28,7 @@ export const Colors = {
     accentNeon: '#10B981',        // Mint (kept for backward compat)
 
     // Match scores
-    matchHigh: '#1D3E91',         // Navy high match (70+)
+    matchHigh: '#0558E8',         // Electric Blue high match (70+)
     matchMedium: '#4B6CB7',       // Medium (40-69)
     matchLow: '#9CA3AF',          // Low (<40)
 

@@ -1,0 +1,4 @@
+-- ARCHIVED
+-- This file has been moved to _archive/migration-v6-chat-memory.sql
+-- Use the numbered migration sequence in src/db/migrations/ instead:
+--   npx tsx src/db/migration-runner.ts

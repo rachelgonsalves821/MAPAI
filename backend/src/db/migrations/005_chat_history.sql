@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS public.chat_sessions (
   id            UUID        DEFAULT gen_random_uuid() PRIMARY KEY,
   clerk_user_id TEXT        NOT NULL,
   title         TEXT,                         -- auto-generated or user-edited
+  summary       TEXT,                         -- AI-generated 1-2 sentence session summary
+  message_count INTEGER     DEFAULT 0,        -- denormalized for fast list display
   created_at    TIMESTAMPTZ DEFAULT NOW(),
   updated_at    TIMESTAMPTZ DEFAULT NOW()     -- bumped on each new message
 );

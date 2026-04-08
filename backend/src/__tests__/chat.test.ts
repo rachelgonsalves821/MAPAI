@@ -14,6 +14,8 @@ const mockAiChat = vi.hoisted(() => vi.fn());
 const mockPlacesSearch = vi.hoisted(() => vi.fn());
 const mockGetUserContext = vi.hoisted(() => vi.fn());
 const mockLearnFromInsights = vi.hoisted(() => vi.fn());
+const mockCreateSession = vi.hoisted(() => vi.fn());
+const mockSaveMessage = vi.hoisted(() => vi.fn());
 
 vi.mock('../services/ai-orchestrator.js', () => ({
     AiOrchestrator: vi.fn(() => ({
@@ -31,6 +33,17 @@ vi.mock('../services/memory-service.js', () => ({
     MemoryService: vi.fn(() => ({
         getUserContext: mockGetUserContext,
         learnFromInsights: mockLearnFromInsights,
+    })),
+}));
+
+// ChatService is used by the route to persist sessions and messages.
+// We mock it so tests are not sensitive to DB availability and can control
+// the session ID that flows back in the response.
+vi.mock('../services/chat-service.js', () => ({
+    ChatService: vi.fn(() => ({
+        createSession: mockCreateSession,
+        saveMessage: mockSaveMessage,
+        getSessionHistory: vi.fn().mockResolvedValue([]),
     })),
 }));
 
@@ -75,12 +88,14 @@ describe('POST /v1/chat/message', () => {
         });
         mockPlacesSearch.mockResolvedValue([]);
         mockLearnFromInsights.mockResolvedValue(undefined);
+        mockSaveMessage.mockResolvedValue(undefined);
+        // The route calls chat.createSession() and uses the returned ID as session_id.
+        mockCreateSession.mockResolvedValue('test-session-abc');
         mockAiChat.mockResolvedValue({
             text: 'Here are some great spots!',
             searchQuery: undefined,
             discoveryIntent: undefined,
             preferenceInsights: [],
-            sessionId: 'test-session-abc',
         });
 
         app = await buildTestApp();
@@ -130,11 +145,13 @@ describe('POST /v1/chat/message', () => {
     });
 
     it('Claude API error → 200 with fallback message (no 500 leak)', async () => {
-        // AiOrchestrator catches Claude errors internally and returns a fallback
+        // AiOrchestrator catches Claude errors internally and returns a fallback.
+        // The session_id in the response comes from chat.createSession(), not from
+        // the AI response object, so we align the mock accordingly.
+        mockCreateSession.mockResolvedValue('fallback-session');
         mockAiChat.mockResolvedValue({
             text: "I'm having trouble right now. Could you try again?",
             preferenceInsights: [],
-            sessionId: 'fallback-session',
         });
 
         const response = await app.inject({

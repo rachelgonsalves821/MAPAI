@@ -7,7 +7,7 @@
  * Guest mode sets a local user object that bypasses Clerk entirely.
  */
 
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useRouter, useSegments } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -55,12 +55,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
   const segments = useSegments();
-  const hasNavigated = useRef(false);
-
-  // Reset navigation flag when auth state changes fundamentally
-  useEffect(() => {
-    hasNavigated.current = false;
-  }, [isSignedIn]);
 
   // ─── Sync Clerk user → local state (NO async DB call) ───
   useEffect(() => {
@@ -103,27 +97,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // ─── Route guard — SYNCHRONOUS, no DB calls ───
   useEffect(() => {
     if (isLoading) return;
-    if (hasNavigated.current) return;
 
     const inAuthGroup = segments[0] === '(auth)';
+    const onSSOCallback = segments[0] === 'sso-callback';
+
+    // Don't interfere with the SSO callback — it handles its own navigation
+    if (onSSOCallback) return;
 
     if (!user) {
-      // No user → go to landing
+      // No user → go to landing (only if not already there)
       if (!inAuthGroup) {
         router.replace('/(auth)/landing');
-        hasNavigated.current = true;
       }
     } else if (!user.onboardingComplete) {
-      // User exists but not onboarded → allow auth flow screens
+      // User exists but not onboarded → ensure they're on an onboarding screen
       if (!inAuthGroup) {
         router.replace('/(auth)/create-identity');
-        hasNavigated.current = true;
+      } else if (segments[1] === 'landing' || segments[1] === 'sign-in') {
+        // Stuck on landing/sign-in after OAuth — push forward
+        router.replace('/(auth)/create-identity');
       }
     } else if (user.onboardingComplete) {
-      // Onboarded → go to home (only redirect if in auth group)
+      // Onboarded → go to home (redirect away from auth screens)
       if (inAuthGroup) {
         router.replace('/home');
-        hasNavigated.current = true;
       }
     }
   }, [user, segments, isLoading]);
@@ -134,7 +131,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch {}
     await AsyncStorage.removeItem(GUEST_STORAGE_KEY);
     setUser(null);
-    hasNavigated.current = false;
   }, [clerkSignOut]);
 
   const updateUser = useCallback((updates: Partial<User>) => {
@@ -147,9 +143,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (updated.isGuest) {
         AsyncStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(updated)).catch(() => {});
       }
-
-      // Reset navigation flag so route guard re-evaluates
-      hasNavigated.current = false;
 
       return updated;
     });

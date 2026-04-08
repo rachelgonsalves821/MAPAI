@@ -14,6 +14,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { Colors, BorderRadius, Spacing } from '@/constants/theme';
 import { useLocationStore } from '@/store/locationStore';
 
@@ -30,6 +31,7 @@ interface CollapsedChatBarProps {
 // ─── Component ───────────────────────────────────────────────
 
 export default function CollapsedChatBar({ onFocus }: CollapsedChatBarProps) {
+  const router = useRouter();
   const isDefault = useLocationStore((s) => s.isDefault);
 
   return (
@@ -42,6 +44,13 @@ export default function CollapsedChatBar({ onFocus }: CollapsedChatBarProps) {
         accessibilityRole="button"
         accessibilityLabel="Open chat search"
       >
+        <TouchableOpacity
+          onPress={() => router.push('/chat-history' as any)}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          style={{ marginRight: 6 }}
+        >
+          <Ionicons name="time-outline" size={18} color={Colors.textSecondary} />
+        </TouchableOpacity>
         <Ionicons
           name="search"
           size={17}

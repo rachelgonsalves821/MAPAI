@@ -13,6 +13,9 @@ import websocket from '@fastify/websocket';
 import rateLimit from '@fastify/rate-limit';
 import { chatRoutes } from '../../routes/chat.js';
 import { healthRoutes } from '../../routes/health.js';
+import { socialRoutes } from '../../routes/social.js';
+import { friendRoutes } from '../../routes/friends.js';
+import { reviewRoutes } from '../../routes/reviews.js';
 
 export async function buildTestApp(): Promise<FastifyInstance> {
     const app = Fastify({ logger: false });
@@ -23,6 +26,9 @@ export async function buildTestApp(): Promise<FastifyInstance> {
 
     await app.register(healthRoutes, { prefix: '/v1' });
     await app.register(chatRoutes, { prefix: '/v1/chat' });
+    await app.register(socialRoutes, { prefix: '/v1/social' });
+    await app.register(friendRoutes, { prefix: '/v1/friends' });
+    await app.register(reviewRoutes, { prefix: '/v1/reviews' });
 
     await app.ready();
     return app;

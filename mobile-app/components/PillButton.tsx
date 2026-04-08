@@ -10,7 +10,7 @@ interface PillButtonProps {
 }
 
 export function PillButton({ label, onPress, variant, icon, style }: PillButtonProps) {
-  const bgColor = { white: '#FFFFFF', navy: '#1D3E91', disabled: '#E8E5F0' }[variant];
+  const bgColor = { white: '#FFFFFF', navy: '#0558E8', disabled: '#E8E5F0' }[variant];
   const textColor = { white: '#0F1419', navy: '#FFFFFF', disabled: '#A8A3B8' }[variant];
 
   return (

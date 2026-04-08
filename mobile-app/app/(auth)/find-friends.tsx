@@ -73,7 +73,7 @@ export default function FindFriendsScreen() {
           params: { q: text.trim() },
           headers: token ? { Authorization: `Bearer ${token}` } : {},
         });
-        setSearchResults(res.data?.data ?? []);
+        setSearchResults(res.data?.data?.users ?? []);
       } catch (err) {
         console.warn('User search failed:', err);
         setSearchResults([]);
@@ -100,7 +100,7 @@ export default function FindFriendsScreen() {
       }
 
       const { data } = await Contacts.getContactsAsync({
-        fields: [Contacts.Fields.Emails],
+        fields: [Contacts.Fields.Emails, Contacts.Fields.PhoneNumbers],
       });
 
       const emails = data
@@ -108,7 +108,12 @@ export default function FindFriendsScreen() {
         .filter((e): e is string => !!e)
         .slice(0, 500);
 
-      if (emails.length === 0) {
+      const phoneNumbers = data
+        .flatMap((c) => c.phoneNumbers?.map((p) => p.number) ?? [])
+        .filter((p): p is string => !!p)
+        .slice(0, 500);
+
+      if (emails.length === 0 && phoneNumbers.length === 0) {
         setHasContactsAccess(true);
         return;
       }
@@ -116,7 +121,7 @@ export default function FindFriendsScreen() {
       const token = await getToken();
       const res = await apiClient.post(
         '/v1/friends/match-contacts',
-        { emails },
+        { emails, phoneNumbers },
         { headers: token ? { Authorization: `Bearer ${token}` } : {} }
       );
       const matches = res.data?.data ?? [];
@@ -140,8 +145,8 @@ export default function FindFriendsScreen() {
     try {
       const token = await getToken();
       await apiClient.post(
-        '/v1/friends/request',
-        { addressee_id: userId },
+        '/v1/social/request',
+        { to_user_id: userId },
         { headers: token ? { Authorization: `Bearer ${token}` } : {} }
       );
     } catch (err: any) {
@@ -235,7 +240,7 @@ export default function FindFriendsScreen() {
       {!hasContactsAccess && (
         <TouchableOpacity style={styles.syncCard} onPress={handleSyncContacts} activeOpacity={0.8}>
           <View style={styles.syncIconWrap}>
-            <Ionicons name="phone-portrait-outline" size={22} color="#1D3E91" />
+            <Ionicons name="phone-portrait-outline" size={22} color="#0558E8" />
           </View>
           <View style={styles.syncTextWrap}>
             <Text style={styles.syncTitle}>Sync contacts</Text>
@@ -264,7 +269,7 @@ export default function FindFriendsScreen() {
       <View style={styles.footer}>
         {sentRequests.size > 0 && (
           <TouchableOpacity
-            style={[styles.skipButton, { backgroundColor: '#1D3E91', marginBottom: 12 }]}
+            style={[styles.skipButton, { backgroundColor: '#0558E8', marginBottom: 12 }]}
             onPress={() => router.push('/(auth)/ready')}
             activeOpacity={0.85}
           >
@@ -311,13 +316,13 @@ const styles = StyleSheet.create({
   userInfo: { flex: 1 },
   userName: { fontSize: 15, fontWeight: '500', color: '#1A1A2E' },
   userHandle: { fontSize: 13, color: '#9CA3AF', marginTop: 1 },
-  addPill: { paddingHorizontal: 20, paddingVertical: 8, borderRadius: 999, backgroundColor: '#1D3E91' },
+  addPill: { paddingHorizontal: 20, paddingVertical: 8, borderRadius: 999, backgroundColor: '#0558E8' },
   sentPill: { backgroundColor: '#F3F4F6' },
   addPillText: { fontSize: 13, fontWeight: '600', color: '#FFFFFF' },
   sentPillText: { color: '#9CA3AF' },
   emptyState: { paddingVertical: 40, alignItems: 'center' },
   emptyText: { fontSize: 15, color: '#9CA3AF' },
   footer: { paddingHorizontal: 24, paddingBottom: 32, paddingTop: 8 },
-  skipButton: { height: 56, borderRadius: 999, backgroundColor: '#1D3E91', alignItems: 'center', justifyContent: 'center' },
+  skipButton: { height: 56, borderRadius: 999, backgroundColor: '#0558E8', alignItems: 'center', justifyContent: 'center' },
   skipButtonText: { fontSize: 16, fontWeight: '600', color: '#FFFFFF' },
 });

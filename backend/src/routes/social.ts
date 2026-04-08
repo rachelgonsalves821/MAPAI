@@ -4,6 +4,12 @@
  * POST /v1/social/request  — send friend request
  * PUT  /v1/social/request/:id — accept/reject friend request
  * GET  /v1/social/requests — list pending friend requests
+ *
+ * All friendship state is stored in a single `friendships` table with
+ * columns (requester_id, addressee_id, status). There is no separate
+ * `friend_requests` table.
+ *
+ * Status lifecycle: pending → accepted | blocked
  */
 
 import { FastifyInstance } from 'fastify';
@@ -12,6 +18,7 @@ import { authMiddleware } from '../middleware/auth.js';
 import { envelope, errorResponse } from '../utils/response.js';
 import { getSupabase, hasDatabase } from '../db/supabase-client.js';
 import { SocialService } from '../services/social-service.js';
+import { searchUsers } from '../services/user-search-service.js';
 
 const friendRequestSchema = z.object({
   to_user_id: z.string().uuid(),
@@ -37,26 +44,10 @@ export async function socialRoutes(app: FastifyInstance) {
         return envelope({ friends, count: friends.length });
       }
 
-      const supabase = getSupabase()!;
-      const { data, error } = await (supabase
-        .from('friendships') as any)
-        .select(`
-          friend_id,
-          created_at,
-          friend:users!friendships_friend_id_fkey(
-            id, username, display_name, avatar_url
-          )
-        `)
-        .eq('user_id', userId);
-
-      if (error) {
-        return envelope({ friends: [], count: 0 });
-      }
-
-      return envelope({
-        friends: data || [],
-        count: data?.length || 0,
-      });
+      // friendships table uses requester_id / addressee_id (single directed edge).
+      // A user is a "friend" when status='accepted' and they appear on either side.
+      const friends = await social.getFriends(userId);
+      return envelope({ friends, count: friends.length });
     },
   });
 
@@ -88,22 +79,26 @@ export async function socialRoutes(app: FastifyInstance) {
 
       const supabase = getSupabase()!;
 
-      // Check for existing request
+      // Check for an existing edge in either direction
       const { data: existing } = await (supabase
-        .from('friend_requests') as any)
+        .from('friendships') as any)
         .select('id, status')
-        .or(`and(from_user_id.eq.${userId},to_user_id.eq.${to_user_id}),and(from_user_id.eq.${to_user_id},to_user_id.eq.${userId})`)
+        .or(
+          `and(requester_id.eq.${userId},addressee_id.eq.${to_user_id}),` +
+          `and(requester_id.eq.${to_user_id},addressee_id.eq.${userId})`
+        )
         .maybeSingle();
 
       if (existing) {
         return envelope({ status: 'already_exists', request_id: existing.id });
       }
 
+      // Insert a new pending edge
       const { data, error } = await (supabase
-        .from('friend_requests') as any)
+        .from('friendships') as any)
         .insert({
-          from_user_id: userId,
-          to_user_id,
+          requester_id: userId,
+          addressee_id: to_user_id,
           status: 'pending',
         })
         .select()
@@ -133,26 +128,28 @@ export async function socialRoutes(app: FastifyInstance) {
 
       const supabase = getSupabase()!;
 
+      // Incoming: edges where the current user is the addressee
       const { data: incoming } = await (supabase
-        .from('friend_requests') as any)
+        .from('friendships') as any)
         .select(`
           id, status, created_at,
-          from_user:users!friend_requests_from_user_id_fkey(
+          requester:users!friendships_requester_id_fkey(
             id, username, display_name, avatar_url
           )
         `)
-        .eq('to_user_id', userId)
+        .eq('addressee_id', userId)
         .eq('status', 'pending');
 
+      // Outgoing: edges where the current user is the requester
       const { data: outgoing } = await (supabase
-        .from('friend_requests') as any)
+        .from('friendships') as any)
         .select(`
           id, status, created_at,
-          to_user:users!friend_requests_to_user_id_fkey(
+          addressee:users!friendships_addressee_id_fkey(
             id, username, display_name, avatar_url
           )
         `)
-        .eq('from_user_id', userId)
+        .eq('requester_id', userId)
         .eq('status', 'pending');
 
       return envelope({
@@ -164,6 +161,9 @@ export async function socialRoutes(app: FastifyInstance) {
 
   /**
    * PUT /v1/social/request/:id
+   * The requesting user must be the addressee of the friendship edge.
+   * On 'accepted' the status is updated in-place — no second row is created.
+   * On 'rejected' the row is deleted to keep the table clean.
    */
   app.put<{ Params: { id: string } }>('/request/:id', {
     preHandler: authMiddleware,
@@ -185,48 +185,33 @@ export async function socialRoutes(app: FastifyInstance) {
 
       const supabase = getSupabase()!;
 
-      // Get the request (must be addressed to current user)
-      const { data: friendReq } = await (supabase
-        .from('friend_requests') as any)
-        .select('*')
+      // Must be addressed to the current user and currently pending
+      const { data: friendship } = await (supabase
+        .from('friendships') as any)
+        .select('id, requester_id, addressee_id')
         .eq('id', requestId)
-        .eq('to_user_id', userId)
+        .eq('addressee_id', userId)
+        .eq('status', 'pending')
         .single();
 
-      if (!friendReq) {
+      if (!friendship) {
         return reply.status(404).send(
           errorResponse(404, 'Friend request not found', 'NotFoundError')
         );
       }
 
-      // Update request status
-      await (supabase
-        .from('friend_requests') as any)
-        .update({ status })
-        .eq('id', requestId);
-
-      // If accepted, create bidirectional friendship
       if (status === 'accepted') {
+        // Update the single edge to accepted
         await (supabase
           .from('friendships') as any)
-          .insert([
-            { user_id: friendReq.from_user_id, friend_id: friendReq.to_user_id },
-            { user_id: friendReq.to_user_id, friend_id: friendReq.from_user_id },
-          ]);
-
-        // Update friend counts
-        for (const uid of [friendReq.from_user_id, friendReq.to_user_id]) {
-          const { data: countData } = await (supabase
-            .from('friendships') as any)
-            .select('id', { count: 'exact' })
-            .eq('user_id', uid);
-
-          const count = countData?.length || 0;
-          await (supabase
-            .from('users') as any)
-            .update({ social: { friends_count: count, mutuals: 0 } })
-            .eq('id', uid);
-        }
+          .update({ status: 'accepted', updated_at: new Date().toISOString() })
+          .eq('id', requestId);
+      } else {
+        // Rejected — delete the row so the requester can try again later
+        await (supabase
+          .from('friendships') as any)
+          .delete()
+          .eq('id', requestId);
       }
 
       return envelope({ status });
@@ -370,4 +355,31 @@ export async function socialRoutes(app: FastifyInstance) {
       return envelope({ reported: true });
     },
   });
+
+  // ─── User Search ─────────────────────────────────────────────────────────
+  //
+  // Delegates to UserSearchService so both /v1/social/search and
+  // /v1/users/search run identical query logic against user_profiles.
+  //
+  // Response: { data: { users: SearchedUser[] } }
+  //   SearchedUser.id  = clerk_user_id  (canonical identifier)
+
+  app.get<{ Querystring: { q?: string } }>('/search', {
+    preHandler: authMiddleware,
+    handler: async (request, reply) => {
+      const query = (request.query.q ?? '').trim();
+      if (query.length < 2) return reply.send(envelope({ users: [] }));
+
+      try {
+        const users = await searchUsers(query, request.user!.id, 20);
+        return reply.send(envelope({ users }));
+      } catch (err) {
+        app.log.error(err, 'User search failed');
+        return reply.status(500).send(
+          errorResponse(500, 'User search failed', 'ServerError'),
+        );
+      }
+    },
+  });
+
 }

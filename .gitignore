@@ -39,3 +39,6 @@ social-signals.json
 
 # Gemini brain (local only)
 .gemini/
+
+.vercel
+.env*.local

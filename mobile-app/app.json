@@ -8,6 +8,8 @@
     "scheme": "mapai",
     "userInterfaceStyle": "light",
     "splash": {
+      "image": "./assets/images/splash-icon.png",
+      "resizeMode": "contain",
       "backgroundColor": "#FFFFFF"
     },
     "ios": {
@@ -83,6 +85,9 @@
     "android": {
       "package": "app.mapai.mobile",
       "adaptiveIcon": {
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "backgroundImage": "./assets/images/android-icon-background.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png",
         "backgroundColor": "#1D3E91"
       },
       "config": {
@@ -98,7 +103,7 @@
     },
     "web": {
       "bundler": "metro",
-      "output": "static",
+      "output": "single",
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
@@ -113,7 +118,28 @@
           "isIosBackgroundLocationEnabled": true
         }
       ],
-      "expo-secure-store"
+      "expo-apple-authentication",
+      "expo-secure-store",
+      ["@sentry/react-native/expo", { "organization": "mapai", "project": "mapai-mobile" }],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#0558E8"
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Mapai uses your camera to scan QR codes when checking in at partner locations."
+        }
+      ],
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "Mapai can optionally sync your contacts to help you find and add friends. No contact data is stored on our servers."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": false

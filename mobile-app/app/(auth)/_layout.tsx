@@ -12,6 +12,7 @@ export default function AuthLayout() {
       <Stack.Screen name="landing" options={{ animation: 'none' }} />
       <Stack.Screen name="sign-in" />
       <Stack.Screen name="create-identity" />
+      <Stack.Screen name="enable-location" />
       <Stack.Screen name="find-friends" />
       <Stack.Screen name="ready" />
       <Stack.Screen name="mfa-challenge" />

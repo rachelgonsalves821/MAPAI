@@ -2,49 +2,45 @@
  * Mapai — Crash Reporting Service
  * Wraps Sentry for error tracking with screen context.
  *
- * Setup: Once @sentry/react-native is installed, uncomment the Sentry imports
- * and remove the stub implementations.
+ * Graceful degradation: if EXPO_PUBLIC_SENTRY_DSN is not set the service
+ * falls back to console-only logging and never throws.
  *
- * Install command:
- *   npx expo install @sentry/react-native
- *   npx sentry-wizard -i reactNative -p ios android
- *
- * Add to app.json plugins:
- *   ["@sentry/react-native/expo", { "organization": "mapai", "project": "mapai-ios" }]
+ * PII policy: only the anonymous Clerk user ID is ever sent to Sentry.
+ * Email, username, and displayName are stripped in beforeSend.
  */
 
-// import * as Sentry from '@sentry/react-native';
+import * as Sentry from '@sentry/react-native';
 
 const SENTRY_DSN = process.env.EXPO_PUBLIC_SENTRY_DSN || '';
 let isInitialized = false;
 
 export const CrashReporting = {
   /**
-   * Initialize Sentry. Call once in root layout.
+   * Initialize Sentry. Call once in root layout on mount.
+   * Safe to call without a DSN — logs a warning and returns.
    */
   init() {
-    if (isInitialized || !SENTRY_DSN) {
-      if (!SENTRY_DSN) {
-        console.log('[CrashReporting] No SENTRY_DSN set — crash reporting disabled');
-      }
+    if (isInitialized) return;
+
+    if (!SENTRY_DSN) {
+      console.log('[CrashReporting] Sentry disabled — no DSN');
       return;
     }
 
-    // Uncomment when @sentry/react-native is installed:
-    // Sentry.init({
-    //   dsn: SENTRY_DSN,
-    //   enableAutoSessionTracking: true,
-    //   tracesSampleRate: 0.2,
-    //   environment: process.env.APP_ENV || 'development',
-    //   beforeSend(event) {
-    //     // Strip PII — never send email or displayName
-    //     if (event.user) {
-    //       delete event.user.email;
-    //       delete event.user.username;
-    //     }
-    //     return event;
-    //   },
-    // });
+    Sentry.init({
+      dsn: SENTRY_DSN,
+      enableAutoSessionTracking: true,
+      tracesSampleRate: 0.2,
+      environment: process.env.APP_ENV || 'development',
+      beforeSend(event) {
+        // Strip PII — never send email or displayName
+        if (event.user) {
+          delete event.user.email;
+          delete event.user.username;
+        }
+        return event;
+      },
+    });
 
     isInitialized = true;
     console.log('[CrashReporting] Sentry initialized');
@@ -54,8 +50,16 @@ export const CrashReporting = {
    * Set the anonymous user ID for crash context. Never pass email or PII.
    */
   setUser(anonymousId: string) {
-    // Sentry.setUser({ id: anonymousId });
+    Sentry.setUser({ id: anonymousId });
     console.log('[CrashReporting] setUser', anonymousId);
+  },
+
+  /**
+   * Clear the user context on sign-out.
+   */
+  clearUser() {
+    Sentry.setUser(null);
+    console.log('[CrashReporting] clearUser');
   },
 
   /**
@@ -63,7 +67,7 @@ export const CrashReporting = {
    * Call this from navigation state change handlers.
    */
   setScreen(screenName: string) {
-    // Sentry.setTag('screen', screenName);
+    Sentry.setTag('screen', screenName);
     console.log('[CrashReporting] setScreen', screenName);
   },
 
@@ -72,13 +76,14 @@ export const CrashReporting = {
    */
   captureException(error: Error, context?: Record<string, any>) {
     console.error('[CrashReporting] captureException', error.message, context);
-    // Sentry.captureException(error, { extra: context });
+    Sentry.captureException(error, { extra: context });
   },
 
   /**
    * Capture a breadcrumb for debugging context.
    */
   addBreadcrumb(message: string, category: string, data?: Record<string, any>) {
-    // Sentry.addBreadcrumb({ message, category, data, level: 'info' });
+    Sentry.addBreadcrumb({ message, category, data, level: 'info' });
+    console.log('[CrashReporting] addBreadcrumb', category, message);
   },
 };

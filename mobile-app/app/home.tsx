@@ -8,7 +8,7 @@
  *  - ChatOverlay bottom sheet anchored at the bottom
  */
 
-import React, { useCallback, useRef } from 'react';
+import React, { useCallback, useRef, useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -25,6 +25,7 @@ import ChatOverlay from '@/components/ChatOverlay';
 import { useMapStore } from '@/store/mapStore';
 import { useUIStore } from '@/store/uiStore';
 import { Place } from '@/types';
+import { BACKEND_URL } from '@/constants/api';
 
 // ─── Layout constants ────────────────────────────────────────
 
@@ -36,9 +37,16 @@ export default function HomeScreen() {
   const router = useRouter();
   const { discoveryPlaces, selectedPlace, setSelectedPlace } = useMapStore();
   const { mapOpacity } = useUIStore();
+  const [pointsBalance, setPointsBalance] = useState<number | null>(null);
 
-  // Animated opacity value — driven by uiStore mapOpacity changes
-  // We use a ref + Animated.Value so we can smoothly interpolate dim transitions
+  // Fetch points balance on mount
+  useEffect(() => {
+    fetch(`${BACKEND_URL}/v1/loyalty/balance`)
+      .then(r => r.json())
+      .then(d => setPointsBalance(d.data?.balance ?? 0))
+      .catch(() => {});
+  }, []);
+
   const dimOpacity = useRef(new Animated.Value(0)).current;
 
   // Sync Animated.Value with store mapOpacity
@@ -61,6 +69,14 @@ export default function HomeScreen() {
 
   const openProfile = useCallback(() => {
     router.push('/profile' as any);
+  }, [router]);
+
+  const openSocial = useCallback(() => {
+    router.push('/social' as any);
+  }, [router]);
+
+  const openRewards = useCallback(() => {
+    router.push('/rewards' as any);
   }, [router]);
 
   return (
@@ -94,20 +110,38 @@ export default function HomeScreen() {
           <Text style={styles.locationText}>Back Bay, Boston</Text>
         </TouchableOpacity>
 
-        {/* Profile button */}
-        <TouchableOpacity
-          style={styles.profileBtn}
-          onPress={openProfile}
-          activeOpacity={0.85}
-          accessibilityRole="button"
-          accessibilityLabel="Open profile"
-        >
-          <Ionicons
-            name="person-outline"
-            size={19}
-            color={Colors.textSecondary}
-          />
-        </TouchableOpacity>
+        {/* Right-side button group */}
+        <View style={styles.headerRight}>
+          {/* Points & Rewards badge */}
+          <TouchableOpacity
+            style={styles.pointsBadge}
+            onPress={openRewards}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Points and rewards"
+          >
+            <Ionicons name="gift" size={14} color={Colors.brandBlue} />
+            <Text style={styles.pointsText}>
+              {pointsBalance !== null ? pointsBalance : '–'}
+            </Text>
+            <Text style={styles.ptsLabel}>pts</Text>
+          </TouchableOpacity>
+
+          {/* Profile button */}
+          <TouchableOpacity
+            style={styles.profileBtn}
+            onPress={openProfile}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Open profile"
+          >
+            <Ionicons
+              name="person-outline"
+              size={19}
+              color={Colors.textSecondary}
+            />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* ── Chat overlay bottom sheet ────────────────── */}
@@ -162,6 +196,11 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
   },
 
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
   profileBtn: {
     width: 40,
     height: 40,
@@ -170,5 +209,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     ...Shadows.md,
+  },
+  pointsBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: Colors.brandBlue,
+    ...Shadows.md,
+  },
+  pointsText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: Colors.brandBlue,
+  },
+  ptsLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.textSecondary,
   },
 });

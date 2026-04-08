@@ -22,10 +22,8 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Shadows } from '@/constants/theme';
 import { useMapStore } from '@/store/mapStore';
-import { useLocationStore } from '@/store/locationStore';
-import { buildUserContext } from '@/lib/buildUserContext';
-
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:3001';
+import { useChatStore, ChatMessage } from '@/store/chatStore';
+import { useChatActions } from '@/hooks/useChatActions';
 const { width: SCREEN_W } = Dimensions.get('window');
 
 // ─── Types ────────────────────────────────────────────────────
@@ -39,15 +37,6 @@ type PlaceResult = {
   matchReasons?: string[];
   address?: string;
   location?: { latitude: number; longitude: number };
-};
-
-type ResponseType = 'recommendation' | 'conversational' | 'error';
-
-type Message = {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  places?: PlaceResult[];
 };
 
 // ─── Place Card ───────────────────────────────────────────────
@@ -104,10 +93,9 @@ function PlaceCard({ place, index }: { place: PlaceResult; index: number }) {
 export default function ChatScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ query?: string }>();
-  const [messages, setMessages] = useState<Message[]>([]);
+  const { messages, isLoading: loading, currentSessionId } = useChatStore();
+  const { sendMessage, startNewChat } = useChatActions();
   const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
-  const sessionId = useRef(`session-${Date.now()}`).current;
   const scrollRef = useRef<ScrollView>(null);
   const { setDiscoveryPlaces } = useMapStore();
   const hasAutoSent = useRef(false);
@@ -119,99 +107,29 @@ export default function ChatScreen() {
     async (overrideText?: string) => {
       const text = (overrideText || input).trim();
       if (!text || loading) return;
-
-      const userMsg: Message = {
-        id: `u-${Date.now()}`,
-        role: 'user',
-        content: text,
-      };
-      setMessages((prev) => [...prev, userMsg]);
       if (!overrideText) setInput('');
-      setLoading(true);
       scrollToBottom();
 
-      try {
-        console.log('CHAT REQUEST:', { message: text, sessionId, apiUrl: `${BACKEND_URL}/v1/chat/message` });
+      const result = await sendMessage(text);
 
-        const res = await fetch(`${BACKEND_URL}/v1/chat/message`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            message: text,
-            session_id: sessionId,
-            location: {
-              lat: useLocationStore.getState().coords.latitude,
-              lng: useLocationStore.getState().coords.longitude,
-            },
-          }),
-        });
-
-        if (!res.ok) {
-          const errBody = await res.text();
-          console.error('CHAT RESPONSE ERROR:', res.status, errBody);
-          throw new Error(`Server returned ${res.status}: ${errBody}`);
-        }
-
-        const json = await res.json();
-        console.log('CHAT RESPONSE:', JSON.stringify(json).slice(0, 500));
-        const data = json.data ?? json;
-        const responseType: ResponseType = data.type || 'recommendation';
-        const places =
-          Array.isArray(data.places) ? data.places.slice(0, 5) : [];
-
-        console.log('PLACES RECEIVED:', places.length, places.map((p: any) => p.name));
-
-        if (places.length > 0) {
-          const mappedPlaces = places
-            .filter((p: any) => p.location?.latitude && p.location?.longitude)
-            .map((p: any) => ({
-              ...p,
-              location: {
-                latitude: p.location.latitude,
-                longitude: p.location.longitude,
-              },
-              matchScore: p.matchScore ?? 50,
-              matchReasons: p.matchReasons || [],
-              socialSignals: p.socialSignals || [],
-              isLoyalty: false,
-              visitCount: 0,
-            }));
-          console.log('MAP MARKERS:', mappedPlaces.length, mappedPlaces.map((p: any) => ({ name: p.name, lat: p.location.latitude, lng: p.location.longitude })));
-          if (mappedPlaces.length > 0) {
-            setDiscoveryPlaces(mappedPlaces);
-          }
-        }
-
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `a-${Date.now()}`,
-            role: 'assistant',
-            content: data.reply || data.text || '(no response)',
-            places,
-          },
-        ]);
-      } catch (err: any) {
-        console.error('CHAT ERROR:', err);
-        const isNet =
-          err.message?.includes('Network request failed') ||
-          err.message?.includes('fetch failed');
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `e-${Date.now()}`,
-            role: 'assistant',
-            content: isNet
-              ? `Can't reach the backend.\n\nCheck that:\n• Backend is running (npm run dev)\n• EXPO_PUBLIC_BACKEND_URL is set correctly\n• Current: ${BACKEND_URL}`
-              : `Error: ${err.message}`,
-          },
-        ]);
-      } finally {
-        setLoading(false);
-        scrollToBottom();
+      // Update map markers if places were returned
+      if (result?.places?.length) {
+        const mappedPlaces = result.places
+          .filter((p: any) => p.location?.latitude && p.location?.longitude)
+          .map((p: any) => ({
+            ...p,
+            location: { latitude: p.location.latitude, longitude: p.location.longitude },
+            matchScore: p.matchScore ?? 50,
+            matchReasons: p.matchReasons || [],
+            socialSignals: p.socialSignals || [],
+            isLoyalty: false,
+            visitCount: 0,
+          }));
+        if (mappedPlaces.length > 0) setDiscoveryPlaces(mappedPlaces);
       }
+      scrollToBottom();
     },
-    [input, loading, sessionId, setDiscoveryPlaces],
+    [input, loading, sendMessage, setDiscoveryPlaces],
   );
 
   // Auto-send if opened with a query from HomeScreen
@@ -233,7 +151,7 @@ export default function ChatScreen() {
           <Text style={styles.headerTitle}>Mapai</Text>
           <View style={styles.statusDot} />
         </View>
-        <TouchableOpacity style={styles.historyBtn}>
+        <TouchableOpacity style={styles.historyBtn} onPress={() => router.push('/chat-history' as any)}>
           <Ionicons name="time-outline" size={22} color={Colors.textSecondary} />
         </TouchableOpacity>
       </View>

@@ -1,104 +1,16 @@
 /**
  * Mapai Backend — Social Service
  * Handles loved places, activity feed, blocks, and friend social features.
- * Uses Supabase when available, in-memory fallback otherwise.
+ * Requires a Supabase database connection — configure SUPABASE_URL and
+ * SUPABASE_SERVICE_ROLE_KEY in your .env to enable all functionality.
  */
 
 import { getSupabase, hasDatabase } from '../db/supabase-client.js';
 
-// In-memory fallback stores (seeded with dev data when no database is available)
-const inMemoryLovedPlaces = new Map<string, any[]>();
-const inMemoryActivity = new Map<string, any[]>();
-const inMemoryBlocks = new Map<string, string[]>();
-const inMemoryFriendships = new Map<string, any[]>();
-
-// Seed in-memory stores with dev data so the Social tab isn't empty without Supabase
-(function seedInMemoryDevData() {
-    const DEV_USER = 'dev-user-001';
-    const DEV_FRIEND = 'dev-user-002';
-    const now = new Date().toISOString();
-    const hourAgo = new Date(Date.now() - 3600000).toISOString();
-    const dayAgo = new Date(Date.now() - 86400000).toISOString();
-
-    // Loved places for dev user
-    inMemoryLovedPlaces.set(DEV_USER, [
-        {
-            id: 'loved-seed-1',
-            user_id: DEV_USER,
-            place_id: 'place-neptune',
-            place_name: 'Neptune Oyster',
-            name: 'Neptune Oyster',
-            neighborhood: 'North End',
-            priceRange: '$$$',
-            category: 'Seafood',
-            rating: 4.8,
-            one_line_review: 'Best lobster roll in Boston',
-            visibility: 'friends',
-            visit_count: 5,
-            created_at: dayAgo,
-        },
-        {
-            id: 'loved-seed-2',
-            user_id: DEV_USER,
-            place_id: 'place-tatte',
-            place_name: 'Tatte Bakery',
-            name: 'Tatte Bakery',
-            neighborhood: 'Beacon Hill',
-            priceRange: '$$',
-            category: 'Cafe',
-            rating: 4.5,
-            one_line_review: 'Amazing pastries and coffee',
-            visibility: 'public',
-            visit_count: 12,
-            created_at: dayAgo,
-        },
-        {
-            id: 'loved-seed-3',
-            user_id: DEV_USER,
-            place_id: 'place-giulia',
-            place_name: 'Giulia',
-            name: 'Giulia',
-            neighborhood: 'Cambridge',
-            priceRange: '$$$',
-            category: 'Italian',
-            rating: 4.7,
-            visibility: 'friends',
-            visit_count: 3,
-            created_at: dayAgo,
-        },
-    ]);
-
-    // Activity feed (global)
-    inMemoryActivity.set('global', [
-        {
-            id: 'act-seed-1',
-            actor_id: DEV_FRIEND,
-            actor_name: 'Alex Chen',
-            activity_type: 'place_loved',
-            place_id: 'place-neptune',
-            place_name: 'Neptune Oyster',
-            metadata: { one_line_review: 'Incredible raw bar!' },
-            created_at: hourAgo,
-        },
-        {
-            id: 'act-seed-2',
-            actor_id: DEV_FRIEND,
-            actor_name: 'Alex Chen',
-            activity_type: 'place_visited',
-            place_id: 'place-tatte',
-            place_name: 'Tatte Bakery',
-            metadata: {},
-            created_at: dayAgo,
-        },
-    ]);
-    // Friendships (bidirectional)
-    inMemoryFriendships.set(DEV_USER, [
-        { friend_id: DEV_FRIEND, display_name: 'Alex Chen', username: 'alexchen', created_at: dayAgo },
-    ]);
-    inMemoryFriendships.set(DEV_FRIEND, [
-        { friend_id: DEV_USER, display_name: 'Dev User', username: 'devuser', created_at: dayAgo },
-    ]);
-})();
+/** Strip anything that isn't alphanumeric, underscore, or hyphen to prevent filter injection. */
+function sanitizeId(id: string): string {
+    return id.replace(/[^a-zA-Z0-9_-]/g, '');
+}
 
 export class SocialService {
 
@@ -106,9 +18,7 @@ export class SocialService {
 
     async blockUser(blockerId: string, blockedId: string, reason?: string): Promise<void> {
         if (!hasDatabase()) {
-            const blocks = inMemoryBlocks.get(blockerId) || [];
-            if (!blocks.includes(blockedId)) blocks.push(blockedId);
-            inMemoryBlocks.set(blockerId, blocks);
+            console.warn('[SocialService] No database — blockUser is a no-op (configure Supabase to persist blocks)');
             return;
         }
         const supabase = getSupabase()!;
@@ -118,19 +28,17 @@ export class SocialService {
             reason,
         } as any, { onConflict: 'blocker_id,blocked_id' });
 
-        // Also remove any existing friendship
-        await supabase.from('friendships').delete()
-            .or(`and(user_id.eq.${blockerId},friend_id.eq.${blockedId}),and(user_id.eq.${blockedId},friend_id.eq.${blockerId})`);
-
-        // Remove pending requests
-        await supabase.from('friend_requests').delete()
-            .or(`and(from_user_id.eq.${blockerId},to_user_id.eq.${blockedId}),and(from_user_id.eq.${blockedId},to_user_id.eq.${blockerId})`);
+        // Remove any existing friendship edge between the two users (either direction)
+        await (supabase.from('friendships') as any).delete()
+            .or(
+                `and(requester_id.eq.${blockerId},addressee_id.eq.${blockedId}),` +
+                `and(requester_id.eq.${blockedId},addressee_id.eq.${blockerId})`
+            );
     }
 
     async unblockUser(blockerId: string, blockedId: string): Promise<void> {
         if (!hasDatabase()) {
-            const blocks = inMemoryBlocks.get(blockerId) || [];
-            inMemoryBlocks.set(blockerId, blocks.filter(id => id !== blockedId));
+            console.warn('[SocialService] No database — unblockUser is a no-op (configure Supabase to persist blocks)');
             return;
         }
         const supabase = getSupabase()!;
@@ -140,19 +48,21 @@ export class SocialService {
 
     async isBlocked(userId1: string, userId2: string): Promise<boolean> {
         if (!hasDatabase()) {
-            const blocks1 = inMemoryBlocks.get(userId1) || [];
-            const blocks2 = inMemoryBlocks.get(userId2) || [];
-            return blocks1.includes(userId2) || blocks2.includes(userId1);
+            console.warn('[SocialService] No database — returning false for isBlocked (configure Supabase to enable block checks)');
+            return false;
         }
         const supabase = getSupabase()!;
         const { count } = await (supabase.from('blocks') as any)
             .select('id', { count: 'exact', head: true })
-            .or(`and(blocker_id.eq.${userId1},blocked_id.eq.${userId2}),and(blocker_id.eq.${userId2},blocked_id.eq.${userId1})`);
+            .or(`and(blocker_id.eq.${sanitizeId(userId1)},blocked_id.eq.${sanitizeId(userId2)}),and(blocker_id.eq.${sanitizeId(userId2)},blocked_id.eq.${sanitizeId(userId1)})`);
         return (count ?? 0) > 0;
     }
 
     async getBlockedIds(userId: string): Promise<string[]> {
-        if (!hasDatabase()) return inMemoryBlocks.get(userId) || [];
+        if (!hasDatabase()) {
+            console.warn('[SocialService] No database — returning empty blocked list for getBlockedIds (configure Supabase to enable blocks)');
+            return [];
+        }
         const supabase = getSupabase()!;
         const { data } = await (supabase.from('blocks') as any)
             .select('blocked_id')
@@ -171,29 +81,8 @@ export class SocialService {
         location?: { latitude: number; longitude: number };
     } = {}): Promise<any> {
         if (!hasDatabase()) {
-            const places = inMemoryLovedPlaces.get(userId) || [];
-            const existing = places.find(p => p.place_id === placeId);
-            if (existing) {
-                Object.assign(existing, opts, { visit_count: (existing.visit_count || 1) + 1, last_visited_at: new Date().toISOString() });
-                return existing;
-            }
-            const newPlace = {
-                id: `loved-${Date.now()}`,
-                user_id: userId,
-                place_id: placeId,
-                ...opts,
-                visit_count: 1,
-                created_at: new Date().toISOString(),
-            };
-            places.push(newPlace);
-            inMemoryLovedPlaces.set(userId, places);
-
-            // Create activity event with location metadata
-            await this.createActivity(userId, 'place_loved', placeId, opts.placeName, {
-                location: opts.location || null,
-                one_line_review: opts.oneLineReview || null,
-            });
-            return newPlace;
+            console.warn('[SocialService] No database — returning null for lovePlace (configure Supabase to persist loved places)');
+            return null;
         }
 
         const supabase = getSupabase()!;
@@ -223,8 +112,7 @@ export class SocialService {
 
     async unlovePlace(userId: string, placeId: string): Promise<void> {
         if (!hasDatabase()) {
-            const places = inMemoryLovedPlaces.get(userId) || [];
-            inMemoryLovedPlaces.set(userId, places.filter(p => p.place_id !== placeId));
+            console.warn('[SocialService] No database — unlovePlace is a no-op (configure Supabase to persist loved places)');
             return;
         }
         const supabase = getSupabase()!;
@@ -233,7 +121,10 @@ export class SocialService {
     }
 
     async getLovedPlaces(userId: string, viewerId?: string): Promise<any[]> {
-        if (!hasDatabase()) return inMemoryLovedPlaces.get(userId) || [];
+        if (!hasDatabase()) {
+            console.warn('[SocialService] No database — returning empty array for getLovedPlaces (configure Supabase to persist loved places)');
+            return [];
+        }
 
         const supabase = getSupabase()!;
         let query = (supabase.from('user_loved_places') as any)
@@ -254,16 +145,10 @@ export class SocialService {
         if (!hasDatabase()) return [];
 
         const supabase = getSupabase()!;
-        // Get user's friend IDs
-        const { data: friendships } = await (supabase.from('friendships') as any)
-            .select('user_id, friend_id')
-            .or(`user_id.eq.${userId},friend_id.eq.${userId}`);
 
-        if (!friendships?.length) return [];
-
-        const friendIds = friendships.map((f: any) =>
-            f.user_id === userId ? f.friend_id : f.user_id
-        );
+        // Resolve accepted friend IDs from the single-edge friendships table
+        const friendIds = await this._getAcceptedFriendIds(userId);
+        if (!friendIds.length) return [];
 
         // Get friends who loved this place
         const { data } = await (supabase.from('user_loved_places') as any)
@@ -285,18 +170,7 @@ export class SocialService {
         metadata: any = {}
     ): Promise<void> {
         if (!hasDatabase()) {
-            const activities = inMemoryActivity.get('global') || [];
-            activities.unshift({
-                id: `act-${Date.now()}`,
-                actor_id: actorId,
-                activity_type: type,
-                place_id: placeId,
-                place_name: placeName,
-                metadata,
-                created_at: new Date().toISOString(),
-            });
-            if (activities.length > 500) activities.length = 500;
-            inMemoryActivity.set('global', activities);
+            console.warn('[SocialService] No database — createActivity is a no-op (configure Supabase to persist activity events)');
             return;
         }
 
@@ -312,21 +186,15 @@ export class SocialService {
 
     async getFriendFeed(userId: string, limit = 20, cursor?: string): Promise<any[]> {
         if (!hasDatabase()) {
-            return (inMemoryActivity.get('global') || []).slice(0, limit);
+            console.warn('[SocialService] No database — returning empty array for getFriendFeed (configure Supabase to enable activity feed)');
+            return [];
         }
 
         const supabase = getSupabase()!;
 
-        // Get friend IDs
-        const { data: friendships } = await (supabase.from('friendships') as any)
-            .select('user_id, friend_id')
-            .or(`user_id.eq.${userId},friend_id.eq.${userId}`);
-
-        if (!friendships?.length) return [];
-
-        const friendIds = friendships.map((f: any) =>
-            f.user_id === userId ? f.friend_id : f.user_id
-        );
+        // Resolve accepted friend IDs from the single-edge friendships table
+        const friendIds = await this._getAcceptedFriendIds(userId);
+        if (!friendIds.length) return [];
 
         // Get blocked IDs to exclude
         const blockedIds = await this.getBlockedIds(userId);
@@ -393,17 +261,25 @@ export class SocialService {
     // ─── Friends List (enhanced) ─────────────────────────
 
     async getFriends(userId: string): Promise<any[]> {
-        if (!hasDatabase()) return inMemoryFriendships.get(userId) || [];
+        if (!hasDatabase()) {
+            console.warn('[SocialService] No database — returning empty array for getFriends (configure Supabase to enable friend lookups)');
+            return [];
+        }
         const supabase = getSupabase()!;
 
-        const { data: friendships } = await (supabase.from('friendships') as any)
-            .select('user_id, friend_id, created_at')
-            .or(`user_id.eq.${userId},friend_id.eq.${userId}`);
+        // Fetch accepted edges; keep created_at so we can expose friends_since
+        const { data: edges } = await (supabase.from('friendships') as any)
+            .select('requester_id, addressee_id, created_at')
+            .or(
+                `and(requester_id.eq.${userId},addressee_id.neq.${userId}),` +
+                `and(addressee_id.eq.${userId},requester_id.neq.${userId})`
+            )
+            .eq('status', 'accepted');
 
-        if (!friendships?.length) return [];
+        if (!edges?.length) return [];
 
-        const friendIds = friendships.map((f: any) =>
-            f.user_id === userId ? f.friend_id : f.user_id
+        const friendIds = edges.map((e: any) =>
+            e.requester_id === userId ? e.addressee_id : e.requester_id
         );
 
         // Get friend profiles
@@ -412,41 +288,65 @@ export class SocialService {
             .in('id', friendIds);
 
         return (users || []).map((u: any) => {
-            const friendship = friendships.find((f: any) =>
-                f.user_id === u.id || f.friend_id === u.id
+            const edge = edges.find((e: any) =>
+                e.requester_id === u.id || e.addressee_id === u.id
             );
-            return { ...u, friends_since: friendship?.created_at };
+            return { ...u, friends_since: edge?.created_at };
         });
     }
 
     async getFriendshipStatus(userId: string, targetId: string): Promise<string> {
-        if (!hasDatabase()) return 'none';
+        if (!hasDatabase()) {
+            console.warn('[SocialService] No database — returning "none" for getFriendshipStatus (configure Supabase to enable friendship checks)');
+            return 'none';
+        }
         if (userId === targetId) return 'self';
 
         const supabase = getSupabase()!;
 
-        // Check blocked
+        // Check blocked first
         if (await this.isBlocked(userId, targetId)) return 'blocked';
 
-        // Check friends
-        const { count: friendCount } = await (supabase.from('friendships') as any)
-            .select('id', { count: 'exact', head: true })
-            .or(`and(user_id.eq.${userId},friend_id.eq.${targetId}),and(user_id.eq.${targetId},friend_id.eq.${userId})`);
-        if ((friendCount ?? 0) > 0) return 'friends';
-
-        // Check pending requests
-        const { data: outgoing } = await (supabase.from('friend_requests') as any)
-            .select('id')
-            .eq('from_user_id', userId).eq('to_user_id', targetId).eq('status', 'pending')
+        // Look for any edge between the two users in the friendships table
+        const { data: edge } = await (supabase.from('friendships') as any)
+            .select('id, status, requester_id, addressee_id')
+            .or(
+                `and(requester_id.eq.${userId},addressee_id.eq.${targetId}),` +
+                `and(requester_id.eq.${targetId},addressee_id.eq.${userId})`
+            )
             .maybeSingle();
-        if (outgoing) return 'pending_outgoing';
 
-        const { data: incoming } = await (supabase.from('friend_requests') as any)
-            .select('id')
-            .eq('from_user_id', targetId).eq('to_user_id', userId).eq('status', 'pending')
-            .maybeSingle();
-        if (incoming) return 'pending_incoming';
+        if (!edge) return 'none';
+
+        if (edge.status === 'accepted') return 'friends';
+
+        if (edge.status === 'pending') {
+            return edge.requester_id === userId ? 'pending_outgoing' : 'pending_incoming';
+        }
 
         return 'none';
+    }
+
+    // ─── Internal helpers ────────────────────────────────
+
+    /**
+     * Returns the IDs of all users who share an accepted friendship edge with
+     * `userId`, regardless of which side of the edge they sit on.
+     */
+    private async _getAcceptedFriendIds(userId: string): Promise<string[]> {
+        const supabase = getSupabase()!;
+        const { data: edges } = await (supabase.from('friendships') as any)
+            .select('requester_id, addressee_id')
+            .or(
+                `and(requester_id.eq.${userId},addressee_id.neq.${userId}),` +
+                `and(addressee_id.eq.${userId},requester_id.neq.${userId})`
+            )
+            .eq('status', 'accepted');
+
+        if (!edges?.length) return [];
+
+        return edges.map((e: any) =>
+            e.requester_id === userId ? e.addressee_id : e.requester_id
+        );
     }
 }

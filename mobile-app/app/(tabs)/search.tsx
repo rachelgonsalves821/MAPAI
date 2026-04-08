@@ -13,14 +13,17 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+
+const PLACE_FALLBACK = require('@/assets/images/place-fallback.png');
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Shadows } from '@/constants/theme';
 import ChatBubble from '@/components/ChatBubble';
-import { useSendMessage } from '@/services/api/hooks';
 import { ChatMessage } from '@/types';
 import { useAuth } from '@/context/AuthContext';
 import { useUIStore } from '@/store/uiStore';
 import { useMapStore } from '@/store/mapStore';
+import { useChatActions } from '@/hooks/useChatActions';
+import { useChatStore } from '@/store/chatStore';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -28,15 +31,14 @@ export default function SearchScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ query?: string }>();
   const scrollRef = useRef<ScrollView>(null);
-  const sessionId = useRef(Date.now().toString()).current;
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
+  const [isSending, setIsSending] = useState(false);
   const { user } = useAuth();
   const { openChat, closeChat } = useUIStore();
   const { setDiscoveryPlaces } = useMapStore();
-
-  const sendMutation = useSendMessage();
+  const { sendMessage: chatSend } = useChatActions();
 
   useEffect(() => {
     openChat();
@@ -51,7 +53,7 @@ export default function SearchScreen() {
 
   const handleSend = async (text?: string) => {
     const messageText = text || inputText.trim();
-    if (!messageText || sendMutation.isPending) return;
+    if (!messageText || isSending) return;
 
     const userMsg: ChatMessage = {
       id: `u-${Date.now()}`,
@@ -62,36 +64,48 @@ export default function SearchScreen() {
 
     setMessages(prev => [...prev, userMsg]);
     setInputText('');
+    setIsSending(true);
 
     try {
-      const response = await sendMutation.mutateAsync({
-        message: messageText,
-        session_id: sessionId,
-        user_id: user?.id || 'anonymous',
-      });
+      const result = await chatSend(messageText);
 
-      const aiMsg: ChatMessage = {
-        id: `a-${Date.now()}`,
-        role: 'assistant',
-        content: response.text,
-        timestamp: new Date(),
-        placeResults: response.places
-      };
+      if (result) {
+        const aiMsg: ChatMessage = {
+          id: `a-${Date.now()}`,
+          role: 'assistant',
+          content: result.text,
+          timestamp: new Date(),
+          placeResults: result.places
+        };
 
-      setMessages(prev => [...prev, aiMsg]);
+        setMessages(prev => [...prev, aiMsg]);
 
-      // Sync results to Discover tab
-      if (response.places && response.places.length > 0) {
-        setDiscoveryPlaces(response.places);
+        // Sync results to Discover tab
+        if (result.places && result.places.length > 0) {
+          setDiscoveryPlaces(result.places);
+        }
+      } else {
+        // chatSend returns null on error — pull error message from chatStore
+        const storeMessages = useChatStore.getState().messages;
+        const lastStoreMsg = storeMessages[storeMessages.length - 1];
+        if (lastStoreMsg?.role === 'assistant') {
+          setMessages(prev => [...prev, {
+            id: lastStoreMsg.id,
+            role: 'assistant',
+            content: lastStoreMsg.content,
+            timestamp: new Date(),
+          }]);
+        }
       }
     } catch (error) {
       console.error('Search error:', error);
     } finally {
+      setIsSending(false);
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
     }
   };
 
-  const isTyping = sendMutation.isPending;
+  const isTyping = isSending;
 
   return (
     <KeyboardAvoidingView
@@ -143,7 +157,7 @@ export default function SearchScreen() {
                     onPress={() => router.push(`/place/${place.id}` as any)}
                   >
                     <Image
-                      source={{ uri: place.photos?.[0] || 'https://via.placeholder.com/300x200' }}
+                      source={place.photos?.[0] ? { uri: place.photos[0] } : PLACE_FALLBACK}
                       style={styles.placeImage}
                     />
 
@@ -360,9 +374,9 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   mapButton: {
-    backgroundColor: 'rgba(29, 62, 145, 0.06)',
+    backgroundColor: 'rgba(5, 88, 232, 0.06)',
     borderWidth: 1,
-    borderColor: 'rgba(29, 62, 145, 0.15)',
+    borderColor: 'rgba(5, 88, 232, 0.15)',
   },
   actionButtonText: {
     color: Colors.textSecondary,

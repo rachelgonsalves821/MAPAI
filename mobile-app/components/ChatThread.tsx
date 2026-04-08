@@ -5,7 +5,7 @@
  * Mirrors the chat logic from app/chat.tsx but designed for in-sheet use.
  *
  * - AI bubbles: left-aligned, #F9FAFB bg, violet left border
- * - User bubbles: right-aligned, #1D3E91 fill, white text
+ * - User bubbles: right-aligned, #0558E8 fill, white text
  * - Place results rendered as horizontal-scroll cards
  * - Calls onClose to collapse the sheet
  * - Updates mapStore.setDiscoveryPlaces when places are returned
@@ -35,13 +35,12 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, BorderRadius, Spacing, Shadows } from '@/constants/theme';
 import { useMapStore } from '@/store/mapStore';
-import { useLocationStore } from '@/store/locationStore';
+import { useChatStore } from '@/store/chatStore';
+import { useChatActions } from '@/hooks/useChatActions';
 import { Place } from '@/types';
 
 // ─── Constants ───────────────────────────────────────────────
 
-const BACKEND_URL =
-  process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:3001';
 const { width: SCREEN_W } = Dimensions.get('window');
 
 // ─── Local types ─────────────────────────────────────────────
@@ -63,12 +62,6 @@ type PlaceResult = {
   distanceLabel?: string;
 };
 
-type Message = {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  places?: PlaceResult[];
-};
 
 // ─── Public handle for ChatOverlay to trigger an auto-send ───
 
@@ -143,9 +136,20 @@ function PlaceCard({
         </Text>
       ) : null}
 
-      {place.matchScore != null ? (
-        <Text style={styles.placeCardScore}>{place.matchScore}% match</Text>
-      ) : null}
+      <View style={styles.placeCardFooter}>
+        {place.matchScore != null ? (
+          <Text style={styles.placeCardScore}>{place.matchScore}% match</Text>
+        ) : null}
+        {place.id ? (
+          <TouchableOpacity
+            onPress={() => router.push(`/place/${place.id}` as any)}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            activeOpacity={0.65}
+          >
+            <Text style={styles.placeCardWhy}>Why?</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
     </TouchableOpacity>
   );
 }
@@ -156,61 +160,47 @@ function ChatThreadInner(
   { onClose, initialQuery }: ChatThreadProps,
   ref: React.Ref<ChatThreadHandle>,
 ) {
-  const [messages, setMessages] = useState<Message[]>([]);
+  // Single source of truth — subscribe reactively so the UI always reflects
+  // whatever useChatActions writes to the store (optimistic user msg, AI reply,
+  // error bubble). No local messages copy needed.
+  const messages = useChatStore((state) => state.messages);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const sessionId = useRef(`session-${Date.now()}`).current;
   const scrollRef = useRef<ScrollView>(null);
   const { setDiscoveryPlaces } = useMapStore();
+  const { sendMessage: chatSend } = useChatActions();
   const hasAutoSent = useRef(false);
 
   const scrollToBottom = useCallback(() => {
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
   }, []);
 
+  /**
+   * Send a message.
+   *
+   * All session management and persistence is delegated to useChatActions
+   * (which in turn delegates persistence to the backend). This component is
+   * only responsible for local UI state (message list, loading indicator,
+   * map pins) and scroll position.
+   */
   const send = useCallback(
     async (overrideText?: string) => {
       const text = (overrideText ?? input).trim();
       if (!text || loading) return;
 
-      const userMsg: Message = {
-        id: `u-${Date.now()}`,
-        role: 'user',
-        content: text,
-      };
-      setMessages((prev) => [...prev, userMsg]);
       if (!overrideText) setInput('');
       setLoading(true);
       scrollToBottom();
 
       try {
-        const res = await fetch(`${BACKEND_URL}/v1/chat/message`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            message: text,
-            session_id: sessionId,
-            location: {
-              lat: useLocationStore.getState().coords.latitude,
-              lng: useLocationStore.getState().coords.longitude,
-            },
-          }),
-        });
+        // useChatActions handles: optimistic user msg → store, backend call,
+        // AI reply → store, error bubble → store. The reactive subscription
+        // above re-renders this component automatically on every store write.
+        const result = await chatSend(text);
 
-        if (!res.ok) {
-          const errBody = await res.text();
-          throw new Error(`Server returned ${res.status}: ${errBody}`);
-        }
-
-        const json = await res.json();
-        const data = json.data ?? json;
-        const places: PlaceResult[] = Array.isArray(data.places)
-          ? data.places.slice(0, 5)
-          : [];
-
-        // Push places to map
-        if (places.length > 0) {
-          const mappedPlaces: Place[] = places
+        // Push place pins to the map if the AI returned results
+        if (result?.places && result.places.length > 0) {
+          const mappedPlaces: Place[] = (result.places as PlaceResult[])
             .filter((p) => p.location?.latitude && p.location?.longitude)
             .map((p) => ({
               id: p.id ?? `place-${Date.now()}-${Math.random()}`,
@@ -238,36 +228,12 @@ function ChatThreadInner(
             setDiscoveryPlaces(mappedPlaces);
           }
         }
-
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `a-${Date.now()}`,
-            role: 'assistant',
-            content: data.reply ?? data.text ?? '(no response)',
-            places,
-          },
-        ]);
-      } catch (err: any) {
-        const isNet =
-          err.message?.includes('Network request failed') ||
-          err.message?.includes('fetch failed');
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `e-${Date.now()}`,
-            role: 'assistant',
-            content: isNet
-              ? `Can't reach the backend.\n\nCheck that:\n• Backend is running (npm run dev)\n• EXPO_PUBLIC_BACKEND_URL is set\n• Current: ${BACKEND_URL}`
-              : `Error: ${err.message}`,
-          },
-        ]);
       } finally {
         setLoading(false);
         scrollToBottom();
       }
     },
-    [input, loading, sessionId, setDiscoveryPlaces, scrollToBottom],
+    [input, loading, setDiscoveryPlaces, scrollToBottom, chatSend],
   );
 
   // Expose sendMessage to parent via ref
@@ -296,15 +262,29 @@ function ChatThreadInner(
           <Text style={styles.headerTitle}>Mapai</Text>
           <View style={styles.statusDot} />
         </View>
-        <TouchableOpacity
-          style={styles.closeBtn}
-          onPress={onClose}
-          activeOpacity={0.7}
-          accessibilityRole="button"
-          accessibilityLabel="Close chat"
-        >
-          <Ionicons name="chevron-down" size={22} color={Colors.textSecondary} />
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          {/* New chat */}
+          <TouchableOpacity
+            onPress={() => {
+              useChatStore.getState().clearChat();
+              setMessages([]);
+            }}
+            activeOpacity={0.7}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons name="add-circle-outline" size={22} color={Colors.brandBlue} />
+          </TouchableOpacity>
+          {/* Close */}
+          <TouchableOpacity
+            style={styles.closeBtn}
+            onPress={onClose}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Close chat"
+          >
+            <Ionicons name="chevron-down" size={22} color={Colors.textSecondary} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Messages */}
@@ -671,10 +651,21 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     lineHeight: 15,
   },
+  placeCardFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 2,
+  },
   placeCardScore: {
     fontSize: 12,
     fontWeight: '700',
     color: Colors.brandBlue,
+  },
+  placeCardWhy: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.brandViolet,
   },
 
   // Typing indicator

@@ -8,7 +8,7 @@ import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth.js';
 import { envelope, errorResponse } from '../utils/response.js';
-import { UserService } from '../services/user-service.js';
+import { UserService, OnboardingPayload } from '../services/user-service.js';
 import { getOrCreateUser, getPublicProfile } from '../services/identity-service.js';
 import { getSupabase, hasDatabase } from '../db/supabase-client.js';
 
@@ -63,7 +63,7 @@ export async function userRoutes(app: FastifyInstance) {
                     await userService.completeOnboarding({
                         user_id: userId,
                         display_name: parsed.data.display_name,
-                        preferences: parsed.data.preferences,
+                        preferences: parsed.data.preferences as OnboardingPayload['preferences'],
                     });
                 }
 
@@ -72,6 +72,48 @@ export async function userRoutes(app: FastifyInstance) {
                 app.log.error(error);
                 return reply.status(500).send(
                     errorResponse(500, 'Failed to save onboarding data', 'ServerError')
+                );
+            }
+        },
+    });
+
+    /**
+     * POST /v1/user/complete-onboarding
+     * Sets Clerk publicMetadata.onboardingCompleted = true via Backend API.
+     * Client-side clerkUser.update() CANNOT set publicMetadata — only the
+     * Backend API can do this, so the mobile app calls this endpoint.
+     */
+    app.post('/complete-onboarding', {
+        preHandler: authMiddleware,
+        handler: async (request, reply) => {
+            const userId = request.user!.id;
+
+            try {
+                const clerkSecretKey = process.env.CLERK_SECRET_KEY;
+                if (clerkSecretKey) {
+                    const { createClerkClient } = await import('@clerk/clerk-sdk-node');
+                    const clerk = createClerkClient({ secretKey: clerkSecretKey });
+                    await clerk.users.updateUser(userId, {
+                        publicMetadata: {
+                            onboardingCompleted: true,
+                            onboardingCompletedAt: new Date().toISOString(),
+                        },
+                    });
+                }
+
+                // Also update Supabase profile
+                if (hasDatabase()) {
+                    const supabase = getSupabase()!;
+                    await (supabase.from('user_profiles') as any)
+                        .update({ is_onboarded: true })
+                        .eq('clerk_user_id', userId);
+                }
+
+                return envelope({ success: true, onboardingCompleted: true });
+            } catch (error: any) {
+                app.log.error(error, 'Failed to complete onboarding metadata');
+                return reply.status(500).send(
+                    errorResponse(500, 'Failed to update onboarding status', 'ServerError')
                 );
             }
         },

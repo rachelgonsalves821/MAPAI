@@ -24,19 +24,15 @@ import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import { Colors, Typography, Spacing, BorderRadius, Shadows } from '@/constants/theme';
 import { LatLng, TransportMode } from '@/types';
 import { decodePolyline } from '@/utils/polyline';
+import { useLocationStore } from '@/store/locationStore';
 
 // ─── Constants ────────────────────────────────────────────────
 
 const GOOGLE_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY || '';
 
-const DEFAULT_ORIGIN: LatLng = {
-    latitude: 42.3601,
-    longitude: -71.0589,
-};
-
 const ROUTE_COLORS: Record<TransportMode, string> = {
     walk: '#059669',
-    drive: '#1D3E91',
+    drive: '#0558E8',
     transit: '#7C3AED',
     uber: '#000000',
     lyft: '#FF00BF',
@@ -50,6 +46,7 @@ interface RouteData {
     durationText: string;
     durationSeconds: number;
     distanceText: string;
+    distanceMeters: number;
     polylinePoints: LatLng[];
 }
 
@@ -87,6 +84,7 @@ async function fetchDirections(
             durationText: leg.duration.text,
             durationSeconds: leg.duration.value,
             distanceText: leg.distance.text,
+            distanceMeters: leg.distance.value,
             polylinePoints: decodePolyline(json.routes[0].overview_polyline.points),
         };
     } catch {
@@ -137,10 +135,51 @@ async function openDeepLink(deepLink: string, webFallback: string): Promise<void
     }
 }
 
+/**
+ * Estimate rideshare price from driving route distance.
+ * Uses Boston-area average rates (2024):
+ *   Uber: $2.55 base + $1.75/mile + $0.35/min + $2.20 booking fee
+ *   Lyft: $2.40 base + $1.65/mile + $0.30/min + $2.00 service fee
+ * Returns a "$X–Y" range (low = off-peak estimate, high = +35% surge buffer).
+ */
+function estimateRidesharePrice(
+    distanceMeters: number,
+    durationSeconds: number,
+    provider: 'uber' | 'lyft',
+): { low: number; high: number; label: string } {
+    const miles = distanceMeters / 1609.34;
+    const minutes = durationSeconds / 60;
+
+    let base: number;
+    let perMile: number;
+    let perMin: number;
+    let fee: number;
+
+    if (provider === 'uber') {
+        base = 2.55;
+        perMile = 1.75;
+        perMin = 0.35;
+        fee = 2.20;
+    } else {
+        base = 2.40;
+        perMile = 1.65;
+        perMin = 0.30;
+        fee = 2.00;
+    }
+
+    const estimate = base + perMile * miles + perMin * minutes + fee;
+    const low = Math.max(5, Math.round(estimate));
+    const high = Math.round(estimate * 1.35);
+
+    return { low, high, label: `$${low}–${high}` };
+}
+
 // ─── Component ────────────────────────────────────────────────
 
 export default function TransportScreen() {
     const router = useRouter();
+    const { coords } = useLocationStore();
+    const userOrigin: LatLng = { latitude: coords.latitude, longitude: coords.longitude };
     const { placeId, placeName, placeAddress, destLat, destLng } =
         useLocalSearchParams<{
             placeId: string;
@@ -167,22 +206,52 @@ export default function TransportScreen() {
             driveData: RouteData | null,
             transitData: RouteData | null,
         ): ModeCardData[] => {
-            // Determine badges
+            // Estimate rideshare prices and routes from driving data
+            const uberEstimate = driveData
+                ? estimateRidesharePrice(driveData.distanceMeters, driveData.durationSeconds, 'uber')
+                : null;
+            const lyftEstimate = driveData
+                ? estimateRidesharePrice(driveData.distanceMeters, driveData.durationSeconds, 'lyft')
+                : null;
+
+            // Rideshare ETA ≈ driving time + ~4 min pickup wait
+            const uberRoute: RouteData | null = driveData
+                ? {
+                      ...driveData,
+                      durationText: `${Math.round(driveData.durationSeconds / 60) + 4} min`,
+                      durationSeconds: driveData.durationSeconds + 240,
+                  }
+                : null;
+            const lyftRoute: RouteData | null = driveData
+                ? {
+                      ...driveData,
+                      durationText: `${Math.round(driveData.durationSeconds / 60) + 4} min`,
+                      durationSeconds: driveData.durationSeconds + 240,
+                  }
+                : null;
+
+            // Determine fastest mode across all options
             const routed: Array<{ mode: TransportMode; seconds: number }> = [];
             if (walkData) routed.push({ mode: 'walk', seconds: walkData.durationSeconds });
             if (driveData) routed.push({ mode: 'drive', seconds: driveData.durationSeconds });
             if (transitData) routed.push({ mode: 'transit', seconds: transitData.durationSeconds });
+            if (uberRoute) routed.push({ mode: 'uber', seconds: uberRoute.durationSeconds });
+            if (lyftRoute) routed.push({ mode: 'lyft', seconds: lyftRoute.durationSeconds });
 
             const fastestMode =
                 routed.length > 0
                     ? routed.reduce((a, b) => (a.seconds < b.seconds ? a : b)).mode
                     : null;
 
-            // Best value: prefer walking, else transit, else driving
+            // Best value: walking free > transit cheap > cheapest rideshare > driving
             const bestValueMode: TransportMode | null = walkData
                 ? 'walk'
                 : transitData
                 ? 'transit'
+                : lyftEstimate && uberEstimate && lyftEstimate.low <= uberEstimate.low
+                ? 'lyft'
+                : uberEstimate
+                ? 'uber'
                 : driveData
                 ? 'drive'
                 : null;
@@ -217,19 +286,19 @@ export default function TransportScreen() {
                     mode: 'uber',
                     label: 'Uber',
                     icon: 'car-sport',
-                    routeData: null,
-                    costLabel: 'Open app for price',
-                    badge: undefined,
-                    loadingFailed: false,
+                    routeData: uberRoute,
+                    costLabel: uberEstimate?.label ?? 'Open app for price',
+                    badge: makeBadge('uber'),
+                    loadingFailed: driveData === null,
                 },
                 {
                     mode: 'lyft',
                     label: 'Lyft',
                     icon: 'car-sport',
-                    routeData: null,
-                    costLabel: 'Open app for price',
-                    badge: undefined,
-                    loadingFailed: false,
+                    routeData: lyftRoute,
+                    costLabel: lyftEstimate?.label ?? 'Open app for price',
+                    badge: makeBadge('lyft'),
+                    loadingFailed: driveData === null,
                 },
                 {
                     mode: 'transit',
@@ -251,9 +320,9 @@ export default function TransportScreen() {
         async function load() {
             setLoading(true);
             const [walkData, driveData, transitData] = await Promise.all([
-                fetchDirections(DEFAULT_ORIGIN, destination, 'walking'),
-                fetchDirections(DEFAULT_ORIGIN, destination, 'driving'),
-                fetchDirections(DEFAULT_ORIGIN, destination, 'transit'),
+                fetchDirections(userOrigin, destination, 'walking'),
+                fetchDirections(userOrigin, destination, 'driving'),
+                fetchDirections(userOrigin, destination, 'transit'),
             ]);
 
             if (!cancelled) {
@@ -292,10 +361,10 @@ export default function TransportScreen() {
 
     // ─── Map region ───────────────────────────────────────────
 
-    const midLat = (DEFAULT_ORIGIN.latitude + destination.latitude) / 2;
-    const midLng = (DEFAULT_ORIGIN.longitude + destination.longitude) / 2;
-    const latDelta = Math.abs(DEFAULT_ORIGIN.latitude - destination.latitude) * 2.2 + 0.01;
-    const lngDelta = Math.abs(DEFAULT_ORIGIN.longitude - destination.longitude) * 2.2 + 0.01;
+    const midLat = (userOrigin.latitude + destination.latitude) / 2;
+    const midLng = (userOrigin.longitude + destination.longitude) / 2;
+    const latDelta = Math.abs(userOrigin.latitude - destination.latitude) * 2.2 + 0.01;
+    const lngDelta = Math.abs(userOrigin.longitude - destination.longitude) * 2.2 + 0.01;
 
     const selectedCard = cards.find((c) => c.mode === selectedMode);
     const polylineCoords = selectedCard?.routeData?.polylinePoints ?? [];
@@ -345,7 +414,7 @@ export default function TransportScreen() {
                     pitchEnabled={false}
                 >
                     {/* Origin marker — 12px blue circle */}
-                    <Marker coordinate={DEFAULT_ORIGIN} anchor={{ x: 0.5, y: 0.5 }}>
+                    <Marker coordinate={userOrigin} anchor={{ x: 0.5, y: 0.5 }}>
                         <View style={styles.originDot} />
                     </Marker>
 
@@ -459,7 +528,17 @@ function ModeCard({ card, selected, onSelect }: ModeCardProps) {
                     )}
                 </View>
 
-                {isRideshare ? (
+                {isRideshare && card.routeData ? (
+                    <View style={styles.cardMeta}>
+                        <Text style={styles.cardEta}>{card.routeData.durationText}</Text>
+                        <Text style={styles.cardMetaSep}>·</Text>
+                        <Text style={styles.cardDistance}>{card.routeData.distanceText}</Text>
+                        <Text style={styles.cardMetaSep}>·</Text>
+                        <Text style={[styles.cardCost, { fontWeight: '600', color: Colors.textPrimary }]}>
+                            {card.costLabel}
+                        </Text>
+                    </View>
+                ) : isRideshare ? (
                     <Text style={styles.cardCost}>{card.costLabel}</Text>
                 ) : card.loadingFailed ? (
                     <Text style={styles.cardUnavailable}>Not available</Text>
@@ -551,7 +630,7 @@ const styles = StyleSheet.create({
         width: 12,
         height: 12,
         borderRadius: 6,
-        backgroundColor: '#1D3E91',
+        backgroundColor: '#0558E8',
         borderWidth: 2,
         borderColor: '#FFFFFF',
     },
@@ -595,7 +674,7 @@ const styles = StyleSheet.create({
         ...Shadows.sm,
     },
     cardSelected: {
-        borderColor: '#1D3E91',
+        borderColor: '#0558E8',
         backgroundColor: '#EFF6FF',
     },
     cardIconWrap: {
@@ -679,7 +758,7 @@ const styles = StyleSheet.create({
         color: '#059669',
     },
     badgeTextFastest: {
-        color: '#1D3E91',
+        color: '#0558E8',
     },
 
     // Bottom nav button
@@ -695,7 +774,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: '#1D3E91',
+        backgroundColor: '#0558E8',
         borderRadius: BorderRadius.full,
         paddingVertical: Spacing.base,
         gap: Spacing.sm,

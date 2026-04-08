@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { View, StyleSheet, TouchableOpacity, Text, Platform } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -6,28 +6,39 @@ import { Colors, Shadows } from '@/constants/theme';
 import ExploreView from '@/components/ExploreView';
 import { Place } from '@/types';
 import { decodePolyline } from '@/utils/polyline';
-import { useNearbyPlaces, useRoutes } from '@/services/api/hooks';
+import { useNearbyPlaces, useRoutes, useLovedPlaces } from '@/services/api/hooks';
+import { useAuth } from '@/context/AuthContext';
 import { useUIStore } from '@/store/uiStore';
+import { useLocationStore } from '@/store/locationStore';
+import PendingSurveyBanner from '@/components/PendingSurveyBanner';
 
 export default function MapScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ selectedPlaceId?: string }>();
   const { openChat } = useUIStore();
+  const { coords } = useLocationStore();
+  const { user } = useAuth();
 
   const [selectedPlaceId, setSelectedPlaceId] = useState<string | undefined>();
   const [selectedRouteMode, setSelectedRouteMode] = useState<string | undefined>();
 
+  const { data: lovedData } = useLovedPlaces(user?.id);
+  const lovedPlaceIds = useMemo(
+    () => new Set((lovedData?.places ?? []).map((p: any) => p.place_id)),
+    [lovedData],
+  );
+
   const { data: places = [] } = useNearbyPlaces({
-    lat: 42.3601,
-    lng: -71.0589,
+    lat: coords.latitude,
+    lng: coords.longitude,
     radius: 3000
   });
 
   const selectedPlace = places.find((p: Place) => p.id === (params.selectedPlaceId || selectedPlaceId));
 
   const { data: availableRoutes = [] } = useRoutes({
-    origin_lat: 42.3601,
-    origin_lng: -71.0589,
+    origin_lat: coords.latitude,
+    origin_lng: coords.longitude,
     dest_lat: selectedPlace?.location.latitude || 0,
     dest_lng: selectedPlace?.location.longitude || 0,
     place_id: selectedPlace?.id || ''
@@ -69,6 +80,7 @@ export default function MapScreen() {
         onPlaceSelect={handlePlaceSelect}
         selectedPlace={selectedPlace}
         routePoints={selectedRoute ? decodePolyline(selectedRoute.polyline) : undefined}
+        lovedPlaceIds={lovedPlaceIds}
       />
 
       {/* Route Selector */}
@@ -91,7 +103,7 @@ export default function MapScreen() {
                   color={selectedRoute?.mode === route.mode ? Colors.brandBlue : Colors.textSecondary}
                 />
                 <Text style={[styles.routeTabText, selectedRoute?.mode === route.mode && styles.routeTabTextActive]}>
-                  {route.description.split(':')[1].trim()}
+                  {route.description.split(':')[1]?.trim() || route.description}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -103,7 +115,7 @@ export default function MapScreen() {
       <View style={styles.header}>
         <TouchableOpacity style={styles.neighborhoodPill}>
           <Ionicons name="location" size={16} color={Colors.brandBlue} />
-          <Text style={styles.neighborhoodText}>South End, Boston</Text>
+          <Text style={styles.neighborhoodText}>Nearby</Text>
           <Ionicons name="chevron-down" size={14} color={Colors.textSecondary} />
         </TouchableOpacity>
 
@@ -111,6 +123,9 @@ export default function MapScreen() {
           <Ionicons name="person" size={20} color={Colors.textSecondary} />
         </TouchableOpacity>
       </View>
+
+      {/* Pending survey banner — slides up from bottom when there's an incomplete survey */}
+      <PendingSurveyBanner />
 
       {/* Chat Pill Overlay */}
       <View style={styles.bottomOverlay}>
@@ -262,9 +277,9 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   routeTabActive: {
-    backgroundColor: 'rgba(29, 62, 145, 0.08)',
+    backgroundColor: 'rgba(5, 88, 232, 0.08)',
     borderWidth: 1,
-    borderColor: 'rgba(29, 62, 145, 0.15)',
+    borderColor: 'rgba(5, 88, 232, 0.15)',
   },
   routeTabText: {
     color: Colors.textSecondary,

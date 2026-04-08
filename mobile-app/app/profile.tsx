@@ -27,8 +27,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useAuthStore } from '@/store/authStore';
 import { useOnboardingStore } from '@/store/onboardingStore';
 import apiClient from '@/services/api/client';
-
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:3001';
+import { BACKEND_URL } from '@/constants/api';
 
 /** Cross-platform confirm — window.confirm on web, Alert.alert on native. */
 function confirmAction(
@@ -51,7 +50,7 @@ function confirmAction(
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const NAVY = '#1D3E91';
+const NAVY = '#0558E8';
 const INACTIVE_TAB = '#6B7280';
 const HEART_RED = '#EF4444';
 const SECTION_LABEL_COLOR = '#6B7280';
@@ -545,7 +544,7 @@ function InsightsTab({ regulars }: { regulars: Regular[] }) {
 // ─── Tab content: Social (redesigned) ─────────────────────────────────────────
 
 // Deterministic color for friend avatars
-const FRIEND_COLORS = ['#1D3E91', '#7C3AED', '#10B981', '#F59E0B', '#EF4444', '#3B82F6'];
+const FRIEND_COLORS = ['#0558E8', '#7C3AED', '#10B981', '#F59E0B', '#EF4444', '#3B82F6'];
 function friendColor(id: string): string {
   let h = 0;
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) & 0xffff;
@@ -610,8 +609,8 @@ function SocialTab({
       })));
     }).catch(() => {});
     // Fetch pending friend requests
-    apiClient.get('/v1/social/requests/incoming').then(r => {
-      setRequests(r.data?.data?.requests || []);
+    apiClient.get('/v1/social/requests').then(r => {
+      setRequests(r.data?.data?.incoming || []);
     }).catch(() => {});
   }, []);
 
@@ -627,17 +626,17 @@ function SocialTab({
   };
 
   const handleAcceptRequest = (reqId: string) => {
-    apiClient.post('/v1/social/friends/accept', { request_id: reqId }).catch(() => {});
+    apiClient.put(`/v1/social/request/${reqId}`, { status: 'accepted' }).catch(() => {});
     setRequests(prev => prev.filter(r => r.id !== reqId));
   };
 
   const handleRejectRequest = (reqId: string) => {
-    apiClient.post('/v1/social/friends/reject', { request_id: reqId }).catch(() => {});
+    apiClient.put(`/v1/social/request/${reqId}`, { status: 'rejected' }).catch(() => {});
     setRequests(prev => prev.filter(r => r.id !== reqId));
   };
 
   const handleSendRequest = (targetId: string) => {
-    apiClient.post('/v1/social/friends/request', { target_user_id: targetId }).catch(() => {});
+    apiClient.post('/v1/social/request', { to_user_id: targetId }).catch(() => {});
     setSentRequests(prev => new Set(prev).add(targetId));
   };
 
@@ -827,10 +826,10 @@ function SocialTab({
       ) : (
         /* ── Your Lists sub-tab ──────────────── */
         <>
-          <SectionHeader label="Your Faves" count={lovedPlaces.length} />
+          <SectionHeader label="Loved" count={lovedPlaces.length} />
           <View style={tabStyles.listCard}>
             {lovedPlaces.length === 0 ? (
-              <Text style={tabStyles.emptyText}>Heart places to build your faves list!</Text>
+              <Text style={tabStyles.emptyText}>Heart places to build your loved list!</Text>
             ) : (
               lovedPlaces.map(p => <LovedPlaceRow key={p.id} place={p} />)
             )}

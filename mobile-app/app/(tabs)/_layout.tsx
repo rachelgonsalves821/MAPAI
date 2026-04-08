@@ -8,6 +8,7 @@ import { Tabs } from 'expo-router';
 import { Platform, StyleSheet, View } from 'react-native';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
+import { usePreferenceSync } from '@/hooks/usePreferenceSync';
 
 type IoniconsName = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -21,6 +22,9 @@ function TabIcon({ name, color, focused }: { name: IoniconsName; color: string; 
 }
 
 export default function TabLayout() {
+  // Sync backend preferences into local authStore cache on mount / auth change
+  usePreferenceSync();
+
   return (
     <Tabs
       screenOptions={{

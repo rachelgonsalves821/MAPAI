@@ -153,7 +153,7 @@ export default function CreateIdentityScreen() {
       console.warn('Backend profile creation failed (non-blocking):', e);
     }
 
-    router.push('/(auth)/find-friends');
+    router.push('/(auth)/enable-location');
   }
 
   function renderUsernameStatus() {
@@ -291,11 +291,11 @@ export default function CreateIdentityScreen() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#C4725A',
+    backgroundColor: '#0558E8',
   },
   photoPlaceholder: {
     height: 200,
-    backgroundColor: '#C4725A',
+    backgroundColor: '#0558E8',
   },
   cardOverlay: {
     flex: 1,
@@ -391,7 +391,7 @@ const styles = StyleSheet.create({
   continueButton: {
     height: 56,
     borderRadius: 999,
-    backgroundColor: '#1D3E91',
+    backgroundColor: '#0558E8',
     alignItems: 'center',
     justifyContent: 'center',
   },

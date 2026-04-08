@@ -72,7 +72,7 @@ export class UserService {
         const supabase = getSupabase()!;
 
         // 1. Delete user data from all tables (order matters — children first)
-        const tables = ['chat_sessions', 'user_memory', 'user_preferences', 'saved_places', 'friend_connections', 'users'];
+        const tables = ['chat_sessions', 'user_memory', 'saved_places', 'friend_connections', 'users'];
         for (const table of tables) {
             const column = table === 'friend_connections' ? 'user_id' : table === 'users' ? 'id' : 'user_id';
             const { error } = await (supabase.from(table) as any).delete().eq(column, userId);
@@ -80,6 +80,12 @@ export class UserService {
                 console.warn(`[User] Failed to delete from ${table}: ${error.message}`);
             }
         }
+
+        // Delete user_preferences matching either ID column (Clerk migration compatibility)
+        await (supabase as any)
+            .from('user_preferences')
+            .delete()
+            .or(`clerk_user_id.eq.${userId},user_id.eq.${userId}`);
 
         // Also delete friend connections where user is the friend
         await (supabase.from('friend_connections') as any).delete().eq('friend_id', userId).catch(() => {});

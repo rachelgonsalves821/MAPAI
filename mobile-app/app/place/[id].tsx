@@ -4,7 +4,7 @@
  * social signals, quick stats, and action CTAs.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
     View,
     Text,
@@ -17,25 +17,87 @@ import {
     ActivityIndicator,
     FlatList,
     Linking,
+    Alert,
+    LayoutAnimation,
+    UIManager,
 } from 'react-native';
+
+// Enable LayoutAnimation on Android
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+    UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, BorderRadius, Shadows } from '@/constants/theme';
 import { Place, SocialSignal } from '@/types';
 import { getPlacePhotoUrl } from '@/services/places';
-
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:3001';
+import SurveyModal, { SurveyData } from '@/components/SurveyModal';
+import QRScannerModal from '@/components/QRScannerModal';
+import { useCheckIn } from '@/services/api/survey';
+import CommunityInsights from '@/components/CommunityInsights';
+import { useMapStore } from '@/store/mapStore';
+import { useWhyThis } from '@/services/api/hooks';
+import apiClient from '@/services/api/client';
+import { useAuth } from '@/context/AuthContext';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+// ─── Social types (local to this screen) ─────────────────────
+
+interface FriendLovedPlace {
+    friend_id: string;
+    friend_name?: string;
+    one_line_review?: string;
+    rating?: number;
+}
+
+// Deterministic avatar color (same palette as social feed)
+const AVATAR_COLORS_PLACE = [
+    '#0558E8', '#7C3AED', '#10B981', '#F59E0B',
+    '#EF4444', '#3B82F6', '#8B5CF6',
+];
+
+function friendAvatarColor(friendId: string): string {
+    let hash = 0;
+    for (let i = 0; i < friendId.length; i++) {
+        hash = (hash * 31 + friendId.charCodeAt(i)) & 0xffff;
+    }
+    return AVATAR_COLORS_PLACE[hash % AVATAR_COLORS_PLACE.length];
+}
+
+function friendInitial(friendId: string, friendName?: string): string {
+    if (friendName && friendName.length > 0) return friendName[0].toUpperCase();
+    return friendId[0]?.toUpperCase() ?? '?';
+}
 
 export default function PlaceDetailScreen() {
     const { id } = useLocalSearchParams<{ id: string }>();
     const router = useRouter();
+    const { user } = useAuth();
     const [place, setPlace] = useState<Place | null>(null);
     const [loading, setLoading] = useState(true);
     const [activePhotoIndex, setActivePhotoIndex] = useState(0);
 
+    // "Why this?" expandable section
+    const [whyExpanded, setWhyExpanded] = useState(false);
+    const whyResult = useWhyThis(id, whyExpanded);
+
+    // Phase 2 — Social layer state
+    const [friendsWhoLove, setFriendsWhoLove] = useState<FriendLovedPlace[]>([]);
+    const [isLoved, setIsLoved] = useState(false);
+    const [loveLoading, setLoveLoading] = useState(false);
+
+    // Check-in flow: QR scanner → check-in API → survey
+    const checkIn = useCheckIn();
+    const [qrScannerVisible, setQrScannerVisible] = useState(false);
+    const [surveyModalVisible, setSurveyModalVisible] = useState(false);
+    const [currentSurvey, setCurrentSurvey] = useState<SurveyData | null>(null);
+
     useEffect(() => {
         loadPlace();
+        if (id) {
+            loadFriendsWhoLove(id);
+            checkIfLoved(id);
+        }
     }, [id]);
 
     const loadPlace = async () => {
@@ -43,9 +105,7 @@ export default function PlaceDetailScreen() {
         setLoading(true);
         try {
             // Fetch directly from backend — already returns scored + enriched data
-            const res = await fetch(`${BACKEND_URL}/v1/places/${id}`);
-            if (!res.ok) throw new Error(`Backend returned ${res.status}`);
-            const json = await res.json();
+            const { data: json } = await apiClient.get(`/v1/places/${id}`);
             const data = json.data?.place;
             if (data) {
                 // Map backend response to Place type with safe defaults
@@ -83,12 +143,109 @@ export default function PlaceDetailScreen() {
         }
     };
 
+    // Fetch friends who love this place
+    const loadFriendsWhoLove = async (placeId: string) => {
+        try {
+            const { data: json } = await apiClient.get(
+                `/v1/social/loved-places/place/${placeId}/friends`,
+            );
+            const friends: FriendLovedPlace[] = json.data?.friends ?? [];
+            setFriendsWhoLove(friends);
+        } catch {
+            // Non-blocking — section simply won't show
+        }
+    };
+
+    // Check if current user has already loved this place
+    const checkIfLoved = async (placeId: string) => {
+        try {
+            const { data: json } = await apiClient.get(`/v1/social/loved-places/${user?.id}`);
+            const places = json.data?.places ?? [];
+            const loved = places.some((p: any) => p.place_id === placeId);
+            setIsLoved(loved);
+        } catch {
+            // Non-blocking
+        }
+    };
+
+    // Toggle Love for this place
+    const handleLoveToggle = useCallback(async () => {
+        if (!place || loveLoading) return;
+        setLoveLoading(true);
+
+        const newLoved = !isLoved;
+        setIsLoved(newLoved); // optimistic
+
+        try {
+            if (newLoved) {
+                await apiClient.post('/v1/social/loved-places', {
+                    place_id: place.id,
+                    place_name: place.name,
+                    location: place.location,
+                });
+            } else {
+                await apiClient.delete(`/v1/social/loved-places/${place.id}`);
+            }
+        } catch {
+            setIsLoved(!newLoved); // revert on error
+        } finally {
+            setLoveLoading(false);
+        }
+    }, [place, isLoved, loveLoading]);
+
     const handleNavigate = () => {
         if (!place) return;
         // Open Google Maps with walking directions
         const url = `https://www.google.com/maps/dir/?api=1&destination=${place.location.latitude},${place.location.longitude}&destination_place_id=${place.id}&travelmode=walking`;
         Linking.openURL(url);
     };
+
+    // Step 1: User taps "Check In" → open QR scanner
+    const handleCheckIn = useCallback(() => {
+        if (!place) return;
+        setQrScannerVisible(true);
+    }, [place]);
+
+    // Step 2: QR scanned successfully → call backend check-in → open survey
+    // qrData is the raw QR string; backend validates the HMAC signature
+    const handleQRSuccess = useCallback(async (qrData: string) => {
+        setQrScannerVisible(false);
+        if (!place) return;
+
+        try {
+            const result = await checkIn.mutateAsync({ placeId: place.id, qrData });
+            if (result?.survey) {
+                setCurrentSurvey({
+                    id: result.survey.id,
+                    placeName: place.name,
+                    pointsAwarded: result.pointsAwarded ?? result.survey.pointsAwarded ?? 3,
+                    questions: result.survey.questions ?? [],
+                });
+                setSurveyModalVisible(true);
+            } else {
+                Alert.alert('Checked In!', `You earned points at ${place.name}!`);
+            }
+        } catch (err: any) {
+            const status = err?.response?.status;
+            if (status === 403) {
+                Alert.alert('Invalid QR Code', 'This QR code could not be verified. Please scan the official Mapai QR code at the venue.');
+            } else if (status === 409) {
+                Alert.alert('Already Checked In', "You've already checked in here today. Come back tomorrow!");
+            } else {
+                Alert.alert('Check-in Failed', 'Please try again in a moment.');
+            }
+        }
+    }, [place, checkIn]);
+
+    const handleSurveyComplete = useCallback(() => {
+        setSurveyModalVisible(false);
+        setCurrentSurvey(null);
+    }, []);
+
+    const handleSurveySkip = useCallback(() => {
+        setSurveyModalVisible(false);
+        setCurrentSurvey(null);
+    }, []);
 
     if (loading) {
         return (
@@ -207,13 +364,80 @@ export default function PlaceDetailScreen() {
                         </View>
                     </View>
 
-                    {/* Match reasoning */}
+                    {/* Match reasoning + expandable "Why this?" */}
                     <View style={styles.reasoningBox}>
                         <Ionicons name="sparkles" size={14} color={Colors.brandViolet} />
                         <Text style={styles.reasoningText}>
                             {place.matchReasons.join(' · ')}
                         </Text>
                     </View>
+                    <TouchableOpacity
+                        style={styles.whyLink}
+                        onPress={() => {
+                            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                            setWhyExpanded((prev) => !prev);
+                        }}
+                        activeOpacity={0.7}
+                        accessibilityRole="button"
+                        accessibilityLabel={whyExpanded ? 'Hide explanation' : 'Why is this recommended for me?'}
+                    >
+                        <Ionicons
+                            name={whyExpanded ? 'chevron-up' : 'chevron-down'}
+                            size={13}
+                            color={Colors.brandViolet}
+                        />
+                        <Text style={styles.whyLinkText}>
+                            {whyExpanded ? 'Hide explanation' : 'Why this?'}
+                        </Text>
+                    </TouchableOpacity>
+
+                    {/* Expanded "Why this?" panel */}
+                    {whyExpanded && (
+                        <View style={styles.whyPanel}>
+                            {whyResult.isLoading ? (
+                                <View style={styles.whyLoading}>
+                                    <ActivityIndicator size="small" color={Colors.brandViolet} />
+                                    <Text style={styles.whyLoadingText}>Personalizing explanation...</Text>
+                                </View>
+                            ) : whyResult.data ? (
+                                <>
+                                    {/* Narrative */}
+                                    <Text style={styles.whyNarrative}>
+                                        {whyResult.data.explanation}
+                                    </Text>
+
+                                    {/* Factor cards */}
+                                    {(whyResult.data.factors || []).map((factor: any, i: number) => (
+                                        <View key={i} style={styles.whyFactorRow}>
+                                            <View style={[
+                                                styles.whyImpactDot,
+                                                factor.impact === 'positive'
+                                                    ? styles.whyImpactPositive
+                                                    : factor.impact === 'negative'
+                                                        ? styles.whyImpactNegative
+                                                        : styles.whyImpactNeutral,
+                                            ]} />
+                                            <View style={styles.whyFactorText}>
+                                                <Text style={styles.whyFactorDimension}>{factor.dimension}</Text>
+                                                <Text style={styles.whyFactorSignal}>{factor.signal}</Text>
+                                            </View>
+                                        </View>
+                                    ))}
+
+                                    {/* Based on footer */}
+                                    {whyResult.data.basedOn && (
+                                        <Text style={styles.whyBasedOn}>
+                                            Based on {whyResult.data.basedOn}
+                                        </Text>
+                                    )}
+                                </>
+                            ) : (
+                                <Text style={styles.whyErrorText}>
+                                    Could not load explanation right now.
+                                </Text>
+                            )}
+                        </View>
+                    )}
                 </View>
 
                 {/* Quick stats row */}
@@ -246,22 +470,83 @@ export default function PlaceDetailScreen() {
 
                 {/* CTA row */}
                 <View style={styles.ctaRow}>
+                    {/* Check In */}
                     <TouchableOpacity
-                        style={[styles.ctaButton, styles.ctaPrimary]}
-                        onPress={handleNavigate}
+                        style={[styles.ctaButton, styles.ctaCheckIn]}
+                        onPress={handleCheckIn}
+                        activeOpacity={0.75}
+                        accessibilityRole="button"
+                        accessibilityLabel="Scan QR code to check in"
                     >
-                        <Ionicons name="walk" size={18} color={Colors.textOnBrand} />
-                        <Text style={[styles.ctaText, styles.ctaPrimaryText]}>
-                            Walk there
-                        </Text>
+                        <Ionicons name="qr-code-outline" size={18} color={Colors.textOnBrand} />
+                        <Text style={[styles.ctaText, styles.ctaPrimaryText]}>Check In</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={styles.ctaButton}>
-                        <Ionicons name="git-compare" size={18} color={Colors.brandBlue} />
+
+                    {/* Navigate */}
+                    <TouchableOpacity
+                        style={styles.ctaButton}
+                        onPress={handleNavigate}
+                        accessibilityRole="button"
+                        accessibilityLabel="Get walking directions"
+                    >
+                        <Ionicons name="walk" size={18} color={Colors.brandBlue} />
+                        <Text style={styles.ctaText}>Walk</Text>
+                    </TouchableOpacity>
+
+                    {/* Compare button */}
+                    <TouchableOpacity
+                        style={styles.ctaButton}
+                        onPress={() => {
+                            if (!place) return;
+                            const { comparisonPlaces, addToComparison } = useMapStore.getState();
+                            const alreadyAdded = comparisonPlaces.some((p) => p.id === place.id);
+                            if (!alreadyAdded) {
+                                addToComparison(place);
+                            }
+                            // After adding, check total count
+                            const updatedCount = useMapStore.getState().comparisonPlaces.length;
+                            if (updatedCount >= 2) {
+                                router.push('/compare');
+                            } else {
+                                Alert.alert(
+                                    'Added to comparison',
+                                    'Select another place to compare with.',
+                                );
+                            }
+                        }}
+                        activeOpacity={0.75}
+                        accessibilityRole="button"
+                        accessibilityLabel="Compare this place with another"
+                    >
+                        <Ionicons name="git-compare-outline" size={18} color={Colors.brandBlue} />
                         <Text style={styles.ctaText}>Compare</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={styles.ctaButton}>
-                        <Ionicons name="bookmark-outline" size={18} color={Colors.brandBlue} />
-                        <Text style={styles.ctaText}>Save</Text>
+
+                    {/* Love button — Phase 2 */}
+                    <TouchableOpacity
+                        style={[
+                            styles.ctaButton,
+                            isLoved && styles.ctaLoveActive,
+                        ]}
+                        onPress={handleLoveToggle}
+                        disabled={loveLoading}
+                        activeOpacity={0.75}
+                        accessibilityRole="button"
+                        accessibilityLabel={isLoved ? 'Remove love' : 'Love this place'}
+                    >
+                        <Ionicons
+                            name={isLoved ? 'heart' : 'heart-outline'}
+                            size={18}
+                            color={isLoved ? '#EF4444' : Colors.brandBlue}
+                        />
+                        <Text
+                            style={[
+                                styles.ctaText,
+                                isLoved && styles.ctaTextLove,
+                            ]}
+                        >
+                            {isLoved ? 'Loved' : 'Love'}
+                        </Text>
                     </TouchableOpacity>
                 </View>
 
@@ -290,6 +575,9 @@ export default function PlaceDetailScreen() {
                         </View>
                     ))}
                 </View>
+
+                {/* Community Insights (aggregated survey stats) */}
+                <CommunityInsights placeId={place.googlePlaceId || id} />
 
                 {/* Info section */}
                 <View style={styles.section}>
@@ -327,9 +615,84 @@ export default function PlaceDetailScreen() {
                     </View>
                 )}
 
+                {/* Phase 2 — Friends who love this place */}
+                {friendsWhoLove.length > 0 && (
+                    <View style={styles.section}>
+                        <Text style={styles.sectionTitle}>Friends who love this</Text>
+                        <View style={styles.friendsCard}>
+                            {friendsWhoLove.map((friend, i) => (
+                                <View key={friend.friend_id} style={[
+                                    styles.friendRow,
+                                    i < friendsWhoLove.length - 1 && styles.friendRowBorder,
+                                ]}>
+                                    {/* Avatar */}
+                                    <View style={[
+                                        styles.friendAvatar,
+                                        { backgroundColor: friendAvatarColor(friend.friend_id) },
+                                    ]}>
+                                        <Text style={styles.friendAvatarInitial}>
+                                            {friendInitial(friend.friend_id, friend.friend_name)}
+                                        </Text>
+                                    </View>
+
+                                    {/* Info */}
+                                    <View style={styles.friendInfo}>
+                                        <View style={styles.friendNameRow}>
+                                            <Text style={styles.friendDisplayName}>
+                                                {friend.friend_name ?? friend.friend_id}
+                                            </Text>
+                                            {typeof friend.rating === 'number' && (
+                                                <View style={styles.friendRating}>
+                                                    <Ionicons
+                                                        name="heart"
+                                                        size={10}
+                                                        color="#EF4444"
+                                                    />
+                                                    <Text style={styles.friendRatingText}>
+                                                        {friend.rating}/5
+                                                    </Text>
+                                                </View>
+                                            )}
+                                        </View>
+                                        {friend.one_line_review ? (
+                                            <Text
+                                                style={styles.friendReview}
+                                                numberOfLines={2}
+                                            >
+                                                {friend.one_line_review}
+                                            </Text>
+                                        ) : null}
+                                    </View>
+                                </View>
+                            ))}
+                        </View>
+                    </View>
+                )}
+
                 {/* Bottom padding */}
                 <View style={{ height: 40 }} />
             </ScrollView>
+
+            {/* QR Scanner — step 1 of check-in flow */}
+            {place && (
+                <QRScannerModal
+                    visible={qrScannerVisible}
+                    placeName={place.name}
+                    placeId={place.id}
+                    onScanSuccess={handleQRSuccess}
+                    onClose={() => setQrScannerVisible(false)}
+                />
+            )}
+
+            {/* Arrival survey — step 2, shown after successful check-in */}
+            {currentSurvey && (
+                <SurveyModal
+                    visible={surveyModalVisible}
+                    survey={currentSurvey}
+                    onComplete={handleSurveyComplete}
+                    onSkip={handleSurveySkip}
+                />
+            )}
         </View>
     );
 }
@@ -542,6 +905,101 @@ const styles = StyleSheet.create({
         lineHeight: 20,
     },
 
+    // "Why this?" link + panel
+    whyLink: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        marginTop: Spacing.sm,
+        alignSelf: 'flex-start',
+        paddingVertical: 2,
+    },
+    whyLinkText: {
+        color: Colors.brandViolet,
+        fontSize: Typography.sizes.sm,
+        fontWeight: '600',
+    },
+    whyPanel: {
+        marginTop: Spacing.sm,
+        backgroundColor: Colors.brandVioletLight,
+        borderRadius: BorderRadius.md,
+        borderWidth: 1,
+        borderColor: Colors.brandViolet + '22',
+        padding: Spacing.md,
+        gap: Spacing.md,
+    },
+    whyLoading: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.sm,
+        paddingVertical: Spacing.sm,
+    },
+    whyLoadingText: {
+        color: Colors.textSecondary,
+        fontSize: Typography.sizes.sm,
+        fontStyle: 'italic',
+    },
+    whyNarrative: {
+        color: Colors.textPrimary,
+        fontSize: Typography.sizes.sm,
+        lineHeight: 21,
+        fontWeight: '400',
+    },
+    whyFactorRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: Spacing.sm,
+        backgroundColor: Colors.background,
+        borderRadius: BorderRadius.sm,
+        borderWidth: 1,
+        borderColor: Colors.surfaceBorder,
+        padding: Spacing.sm,
+    },
+    whyImpactDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        marginTop: 4,
+        flexShrink: 0,
+    },
+    whyImpactPositive: {
+        backgroundColor: Colors.success,
+    },
+    whyImpactNegative: {
+        backgroundColor: '#F59E0B',  // amber — "worth knowing", not alarming
+    },
+    whyImpactNeutral: {
+        backgroundColor: Colors.textTertiary,
+    },
+    whyFactorText: {
+        flex: 1,
+        gap: 2,
+    },
+    whyFactorDimension: {
+        fontSize: Typography.sizes.xs,
+        fontWeight: '700',
+        color: Colors.textPrimary,
+        textTransform: 'uppercase',
+        letterSpacing: 0.4,
+    },
+    whyFactorSignal: {
+        fontSize: Typography.sizes.sm,
+        color: Colors.textSecondary,
+        lineHeight: 18,
+    },
+    whyBasedOn: {
+        fontSize: Typography.sizes.xs,
+        color: Colors.textTertiary,
+        textAlign: 'right',
+        fontStyle: 'italic',
+        marginTop: Spacing.xs,
+    },
+    whyErrorText: {
+        color: Colors.textTertiary,
+        fontSize: Typography.sizes.sm,
+        fontStyle: 'italic',
+    },
+
     // Quick stats
     quickStats: {
         flexDirection: 'row',
@@ -595,6 +1053,11 @@ const styles = StyleSheet.create({
     ctaPrimary: {
         backgroundColor: Colors.brandBlue,
         borderColor: Colors.brandBlue,
+    },
+    ctaCheckIn: {
+        backgroundColor: Colors.brandBlue,
+        borderColor: Colors.brandBlue,
+        flex: 1.4, // slightly wider to accommodate "Check In" label
     },
     ctaText: {
         color: Colors.brandBlue,
@@ -686,5 +1149,80 @@ const styles = StyleSheet.create({
         color: Colors.textSecondary,
         fontSize: Typography.sizes.sm,
         lineHeight: 22,
+    },
+
+    // Love CTA button states
+    ctaLoveActive: {
+        borderColor: '#EF4444',
+        backgroundColor: '#FEF2F2',
+    },
+    ctaTextLove: {
+        color: '#EF4444',
+    },
+
+    // Friends who love this — Phase 2
+    friendsCard: {
+        backgroundColor: Colors.surface,
+        borderRadius: BorderRadius.md,
+        borderWidth: 1,
+        borderColor: Colors.surfaceBorder,
+        overflow: 'hidden',
+    },
+    friendRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        padding: Spacing.md,
+        gap: Spacing.md,
+    },
+    friendRowBorder: {
+        borderBottomWidth: 1,
+        borderBottomColor: Colors.surfaceBorder,
+    },
+    friendAvatar: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+    },
+    friendAvatarInitial: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#FFFFFF',
+    },
+    friendInfo: {
+        flex: 1,
+        gap: 3,
+    },
+    friendNameRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.sm,
+    },
+    friendDisplayName: {
+        fontSize: Typography.sizes.sm,
+        fontWeight: '700',
+        color: '#111827',
+    },
+    friendRating: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 3,
+        backgroundColor: '#FEF2F2',
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: BorderRadius.sm,
+    },
+    friendRatingText: {
+        fontSize: Typography.sizes.xs,
+        color: '#EF4444',
+        fontWeight: '600',
+    },
+    friendReview: {
+        fontSize: Typography.sizes.sm,
+        color: Colors.textSecondary,
+        lineHeight: 18,
+        fontStyle: 'italic',
     },
 });

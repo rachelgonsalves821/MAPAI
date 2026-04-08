@@ -1,7 +1,8 @@
 /**
  * Mapai Backend — Memory Service
  * Manages user preferences + memory facts.
- * Uses Supabase/PostgreSQL when available, falls back to in-memory store.
+ * Requires a Supabase database connection — configure SUPABASE_URL and
+ * SUPABASE_SERVICE_ROLE_KEY in your .env to enable preference persistence.
  */
 
 import { getSupabase, hasDatabase } from '../db/supabase-client.js';
@@ -16,10 +17,6 @@ interface MemoryFact {
     lastUpdated: Date;
     decayWeight: number;
 }
-
-// ─── In-memory fallback (used when Supabase is not configured) ───
-const inMemoryPreferences = new Map<string, UserMemoryContext>();
-const inMemoryFacts = new Map<string, MemoryFact[]>();
 
 const DEFAULT_MEMORY: UserMemoryContext = {
     cuisineLikes: [],
@@ -36,14 +33,15 @@ export class MemoryService {
      */
     async getUserContext(userId: string): Promise<UserMemoryContext> {
         if (!hasDatabase()) {
-            return inMemoryPreferences.get(userId) || { ...DEFAULT_MEMORY };
+            console.warn('[MemoryService] No database — returning default memory context for getUserContext (configure Supabase to persist user preferences)');
+            return { ...DEFAULT_MEMORY };
         }
 
         const supabase = getSupabase()!;
         const { data, error } = await (supabase as any)
             .from('user_preferences')
             .select('dimension, value, confidence')
-            .eq('user_id', userId)
+            .or(`user_id.eq.${userId},clerk_user_id.eq.${userId}`)
             .gte('confidence', 0.3)
             .order('confidence', { ascending: false });
 
@@ -59,14 +57,15 @@ export class MemoryService {
      */
     async getMemoryFacts(userId: string): Promise<MemoryFact[]> {
         if (!hasDatabase()) {
-            return inMemoryFacts.get(userId) || [];
+            console.warn('[MemoryService] No database — returning empty array for getMemoryFacts (configure Supabase to persist user preferences)');
+            return [];
         }
 
         const supabase = getSupabase()!;
         const { data, error } = await (supabase as any)
             .from('user_preferences')
             .select('*')
-            .eq('user_id', userId)
+            .or(`user_id.eq.${userId},clerk_user_id.eq.${userId}`)
             .order('last_updated', { ascending: false });
 
         if (error || !data) return [];
@@ -94,7 +93,8 @@ export class MemoryService {
         if (meaningful.length === 0) return;
 
         if (!hasDatabase()) {
-            return this.learnInMemory(userId, meaningful);
+            console.warn('[MemoryService] No database — learnFromInsights is a no-op (configure Supabase to persist preference insights)');
+            return;
         }
 
         const supabase = getSupabase()!;
@@ -104,7 +104,7 @@ export class MemoryService {
             const { data: existing } = await (supabase as any)
                 .from('user_preferences')
                 .select('id, confidence')
-                .eq('user_id', userId)
+                .or(`user_id.eq.${userId},clerk_user_id.eq.${userId}`)
                 .eq('dimension', insight.type)
                 .eq('value', insight.value)
                 .maybeSingle();
@@ -125,6 +125,7 @@ export class MemoryService {
             } else {
                 await supabase.from('user_preferences').insert({
                     user_id: userId,
+                    clerk_user_id: userId,
                     dimension: insight.type,
                     value: insight.value,
                     confidence: insight.confidence,
@@ -136,14 +137,17 @@ export class MemoryService {
     }
 
     /**
-     * Manually update preferences (from profile screen).
+     * Manually update preferences (from profile screen or onboarding).
+     * Always writes with clerk_user_id as the canonical identifier.
+     * Also sets user_id for backward compatibility with legacy rows.
      */
     async updatePreferences(
         userId: string,
         updates: Record<string, any>
     ): Promise<void> {
         if (!hasDatabase()) {
-            return this.updatePreferencesInMemory(userId, updates);
+            console.warn('[MemoryService] No database — updatePreferences is a no-op (configure Supabase to persist user preferences)');
+            return;
         }
 
         const supabase = getSupabase()!;
@@ -159,15 +163,17 @@ export class MemoryService {
         for (const [key, { dimension, values }] of Object.entries(dimensionMap)) {
             if (!updates[key]) continue;
 
-            // Delete existing for this dimension, then insert new
-            await supabase
+            // Delete existing rows for this user+dimension — match on either ID column
+            // to handle rows created before the Clerk migration.
+            await (supabase as any)
                 .from('user_preferences')
                 .delete()
-                .eq('user_id', userId)
+                .or(`clerk_user_id.eq.${userId},user_id.eq.${userId}`)
                 .eq('dimension', dimension);
 
             if (values.length > 0) {
                 const rows = values.map((v: string) => ({
+                    clerk_user_id: userId,
                     user_id: userId,
                     dimension,
                     value: v,
@@ -181,53 +187,58 @@ export class MemoryService {
 
         // Handle scalar preferences
         if (updates.price_range) {
-            await supabase
+            await (supabase as any)
                 .from('user_preferences')
                 .delete()
-                .eq('user_id', userId)
+                .or(`clerk_user_id.eq.${userId},user_id.eq.${userId}`)
                 .eq('dimension', 'price_preference');
 
             const label = this.priceRangeToLabel(updates.price_range);
-            await supabase.from('user_preferences').insert({
+            await (supabase.from('user_preferences') as any).insert({
+                clerk_user_id: userId,
                 user_id: userId,
                 dimension: 'price_preference',
                 value: label,
                 confidence: 0.95,
                 source: 'explicit',
                 decay_weight: 1.0,
-            } as any);
+            });
         }
 
         if (updates.speed_sensitivity) {
-            await supabase
+            await (supabase as any)
                 .from('user_preferences')
                 .delete()
-                .eq('user_id', userId)
+                .or(`clerk_user_id.eq.${userId},user_id.eq.${userId}`)
                 .eq('dimension', 'speed_sensitivity');
 
-            await supabase.from('user_preferences').insert({
+            await (supabase.from('user_preferences') as any).insert({
+                clerk_user_id: userId,
                 user_id: userId,
                 dimension: 'speed_sensitivity',
                 value: updates.speed_sensitivity,
                 confidence: 0.95,
                 source: 'explicit',
                 decay_weight: 1.0,
-            } as any);
+            });
         }
     }
 
     /**
      * Clear all data (privacy/reset).
+     * Matches on either ID column to catch rows from before the Clerk migration.
      */
     async clearAll(userId: string): Promise<void> {
         if (!hasDatabase()) {
-            inMemoryPreferences.delete(userId);
-            inMemoryFacts.delete(userId);
+            console.warn('[MemoryService] No database — clearAll is a no-op (configure Supabase to delete user preferences)');
             return;
         }
 
         const supabase = getSupabase()!;
-        await supabase.from('user_preferences').delete().eq('user_id', userId);
+        await (supabase as any)
+            .from('user_preferences')
+            .delete()
+            .or(`clerk_user_id.eq.${userId},user_id.eq.${userId}`);
     }
 
     /**
@@ -249,25 +260,180 @@ export class MemoryService {
 
     /**
      * Process feedback from a survey.
+     * Extracts preference signals from survey responses and writes them as
+     * behavioral preference rows (confidence 0.6, source 'behavioral').
+     *
+     * Supports both the current 5-dimension format and the legacy 2-question
+     * format ('improvement' / 'recommendation') for backward compatibility.
+     *
+     * Expected `response` format: JSON-encoded SurveyResponse[]
+     *   New:    [{ questionId: 'satisfaction'|'speed'|'value'|'match'|'return', answer: '...' }, ...]
+     *   Legacy: [{ questionId: 'improvement', answer: '...' }, { questionId: 'recommendation', answer: '...' }]
      */
     async processSurveyFeedback(userId: string, surveyId: string, rating: number, response: string): Promise<void> {
-        if (!hasDatabase()) return;
+        interface SurveyResponse {
+            questionId: string;
+            answer: string;
+        }
+
+        let responses: SurveyResponse[];
+        try {
+            responses = JSON.parse(response) as SurveyResponse[];
+        } catch {
+            console.warn(`[Memory] Could not parse survey responses for survey ${surveyId}`);
+            return;
+        }
+
+        const byId = (id: string) => responses.find(r => r.questionId === id);
+
+        // ── satisfaction ─────────────────────────────────────────────────────
+        // Top-2 positive answers boost place affinity; bottom-2 reduce it.
+        // We surface this as a 'place_affinity' signal so the AI can weight
+        // future recommendations toward / away from similar venues.
+        const satisfaction = byId('satisfaction');
+        if (satisfaction) {
+            const positiveAnswers = new Set(['Loved it', 'Really good']);
+            const negativeAnswers = new Set(['Disappointing', 'Bad experience']);
+
+            if (positiveAnswers.has(satisfaction.answer)) {
+                await this.upsertBehavioralPreference(userId, 'place_affinity', 'positive', 0.6);
+            } else if (negativeAnswers.has(satisfaction.answer)) {
+                await this.upsertBehavioralPreference(userId, 'place_affinity', 'negative', 0.6);
+            }
+        }
+
+        // ── speed ────────────────────────────────────────────────────────────
+        // Fast service → speed_sensitivity: low (user doesn't need to worry).
+        // Slow service → speed_sensitivity: high (user values speed).
+        const speed = byId('speed');
+        if (speed) {
+            if (speed.answer === 'Lightning fast' || speed.answer === 'Quick enough') {
+                await this.upsertBehavioralPreference(userId, 'speed_sensitivity', 'low', 0.6);
+            } else if (speed.answer === 'A bit slow' || speed.answer === 'Painfully slow') {
+                await this.upsertBehavioralPreference(userId, 'speed_sensitivity', 'high', 0.6);
+            }
+        }
+
+        // ── value ────────────────────────────────────────────────────────────
+        // Pricey / overpriced answers signal high price sensitivity.
+        // Positive value answers carry no actionable negative signal — skip.
+        const value = byId('value');
+        if (value) {
+            if (value.answer === 'A bit pricey' || value.answer === 'Overpriced') {
+                await this.upsertBehavioralPreference(userId, 'price_sensitivity', 'high', 0.6);
+            }
+        }
+
+        // ── match ────────────────────────────────────────────────────────────
+        // Measures recommendation calibration quality.
+        // Logged so that an offline analytics pass can tune the ranking model.
+        const match = byId('match');
+        if (match) {
+            const positiveMatch = new Set(['Even better than expected', 'Matched perfectly']);
+            const negativeMatch = new Set(['Not quite', 'Completely off']);
+
+            if (positiveMatch.has(match.answer)) {
+                console.log(
+                    `[Memory] Recommendation calibration POSITIVE for user ${userId} — survey ${surveyId}: "${match.answer}"`
+                );
+            } else if (negativeMatch.has(match.answer)) {
+                console.log(
+                    `[Memory] Recommendation calibration NEGATIVE for user ${userId} — survey ${surveyId}: "${match.answer}"`
+                );
+            }
+        }
+
+        // ── return ───────────────────────────────────────────────────────────
+        // Top-2 positive answers signal high loyalty tendency for this place
+        // category, which can inform future recommendation ranking.
+        const returnQ = byId('return');
+        if (returnQ) {
+            if (returnQ.answer === 'Already planning my next visit' || returnQ.answer === 'Definitely yes') {
+                await this.upsertBehavioralPreference(userId, 'loyalty_tendency', 'high', 0.6);
+            }
+        }
+
+        // ── Legacy: improvement (2-question format) ──────────────────────────
+        // Map each answer option to a preference dimension+value pair.
+        // "Nothing — it's great as is" carries no negative signal — skip it.
+        const legacyDimensionMap: Record<string, { dimension: string; value: string }> = {
+            'Faster service':                  { dimension: 'speed_sensitivity',       value: 'high' },
+            'More seating / less crowded':     { dimension: 'ambiance_preference',     value: 'quiet_spacious' },
+            'Better music / ambiance':         { dimension: 'ambiance_preference',     value: 'good_ambiance' },
+            'More menu variety':               { dimension: 'menu_variety_preference', value: 'high' },
+            'Lower prices':                    { dimension: 'price_sensitivity',        value: 'high' },
+        };
+
+        const improvement = byId('improvement');
+        if (improvement) {
+            const mapping = legacyDimensionMap[improvement.answer];
+            if (mapping) {
+                await this.upsertBehavioralPreference(userId, mapping.dimension, mapping.value, 0.6);
+            }
+        }
+
+        // ── Legacy: recommendation (2-question format) ───────────────────────
+        // High-rating visits (4–5) signal the user genuinely liked this type of
+        // place — surface this in logs so downstream analytics can act on it.
+        const recommendation = byId('recommendation');
+        if (recommendation && rating >= 4) {
+            console.log(
+                `[Memory] User ${userId} highly recommends place (rating: ${rating}, answer: "${recommendation.answer}")`
+            );
+        }
+    }
+
+    /**
+     * Upsert a single behavioral preference row.
+     * Increases confidence by 0.05 on repeat signals (capped at 0.99).
+     */
+    private async upsertBehavioralPreference(
+        userId: string,
+        dimension: string,
+        value: string,
+        confidence: number
+    ): Promise<void> {
+        if (!hasDatabase()) {
+            console.warn('[MemoryService] No database — upsertBehavioralPreference is a no-op (configure Supabase to persist behavioral preferences)');
+            return;
+        }
 
         const supabase = getSupabase()!;
-        
-        // Update survey
-        await (supabase as any).from('surveys').update({
-            rating,
-            response_text: response,
-            processed: true
-        }).eq('id', surveyId);
 
-        // Update preferences based on rating
-        // If rating is high (4-5), boost confidence in related facts
-        // If rating is low (1-2), decrease confidence or mark as dislike
-        if (rating >= 4) {
-             // Heuristic: boost related dimensions
-             console.log('Survey processed:', surveyId, rating, response);
+        // The user_preferences table has a UNIQUE constraint on (clerk_user_id, dimension),
+        // so there is at most one row per dimension per user.  We upsert on that key:
+        // if the row already exists (possibly with a different value from an earlier signal),
+        // update both the value and bump confidence; otherwise insert fresh.
+        const { data: existing } = await (supabase as any)
+            .from('user_preferences')
+            .select('id, confidence')
+            .eq('clerk_user_id', userId)
+            .eq('dimension', dimension)
+            .maybeSingle();
+
+        if (existing) {
+            const newConfidence = Math.min(0.99, parseFloat(String(existing.confidence)) + 0.05);
+            await (supabase as any)
+                .from('user_preferences')
+                .update({
+                    value,
+                    confidence: newConfidence,
+                    source: 'behavioral',
+                    last_updated: new Date().toISOString(),
+                })
+                .eq('id', existing.id);
+        } else {
+            await (supabase as any)
+                .from('user_preferences')
+                .insert({
+                    clerk_user_id: userId,
+                    user_id: userId,
+                    dimension,
+                    value,
+                    confidence,
+                    source: 'behavioral',
+                    decay_weight: 1.0,
+                });
         }
     }
 
@@ -316,66 +482,5 @@ export class MemoryService {
         if (lower.includes('moderate') || lower.includes('mid')) return { min: 2, max: 3 };
         if (lower.includes('upscale') || lower.includes('expensive') || lower.includes('fine')) return { min: 3, max: 4 };
         return { min: 1, max: 3 };
-    }
-
-    // ─── In-memory fallback methods ───────────────────────
-
-    private learnInMemory(userId: string, insights: PreferenceInsight[]): void {
-        const prefs = inMemoryPreferences.get(userId) || { ...DEFAULT_MEMORY };
-        const facts = inMemoryFacts.get(userId) || [];
-
-        for (const insight of insights) {
-            switch (insight.type) {
-                case 'cuisine_like':
-                    if (!prefs.cuisineLikes.includes(insight.value)) {
-                        prefs.cuisineLikes.push(insight.value);
-                    }
-                    break;
-                case 'cuisine_dislike':
-                    if (!prefs.cuisineDislikes.includes(insight.value)) {
-                        prefs.cuisineDislikes.push(insight.value);
-                    }
-                    break;
-                case 'price_preference':
-                    prefs.priceRange = this.labelToPriceRange(insight.value);
-                    break;
-                case 'ambiance_preference':
-                    if (!prefs.ambiancePreferences.includes(insight.value)) {
-                        prefs.ambiancePreferences.push(insight.value);
-                    }
-                    break;
-                case 'dietary_restriction':
-                    if (!prefs.dietaryRestrictions.includes(insight.value)) {
-                        prefs.dietaryRestrictions.push(insight.value);
-                    }
-                    break;
-            }
-
-            facts.push({
-                dimension: insight.type,
-                value: insight.value,
-                confidence: insight.confidence,
-                source: 'inferred',
-                createdAt: new Date(),
-                lastUpdated: new Date(),
-                decayWeight: 1.0,
-            });
-        }
-
-        inMemoryPreferences.set(userId, prefs);
-        inMemoryFacts.set(userId, facts);
-    }
-
-    private updatePreferencesInMemory(userId: string, updates: Record<string, any>): void {
-        const prefs = inMemoryPreferences.get(userId) || { ...DEFAULT_MEMORY };
-
-        if (updates.cuisine_likes) prefs.cuisineLikes = updates.cuisine_likes;
-        if (updates.cuisine_dislikes) prefs.cuisineDislikes = updates.cuisine_dislikes;
-        if (updates.price_range) prefs.priceRange = updates.price_range;
-        if (updates.speed_sensitivity) prefs.speedSensitivity = updates.speed_sensitivity;
-        if (updates.ambiance_preferences) prefs.ambiancePreferences = updates.ambiance_preferences;
-        if (updates.dietary_restrictions) prefs.dietaryRestrictions = updates.dietary_restrictions;
-
-        inMemoryPreferences.set(userId, prefs);
     }
 }

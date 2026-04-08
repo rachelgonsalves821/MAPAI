@@ -23,7 +23,7 @@ import apiClient from '@/services/api/client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width: W, height: H } = Dimensions.get('window');
-const NAVY = '#1D3E91';
+const NAVY = '#0558E8';
 
 export default function ReadyScreen() {
   const router = useRouter();
@@ -41,42 +41,28 @@ export default function ReadyScreen() {
   const resolvedName = displayName || 'Explorer';
 
   async function handleOpenMap() {
-    // 1. PRIMARY: Set Clerk publicMetadata — this is what the router reads
-    if (clerkUser && !clerkUser.publicMetadata?.onboardingCompleted) {
-      try {
-        await clerkUser.update({
-          publicMetadata: {
-            ...clerkUser.publicMetadata,
-            onboardingCompleted: true,
-            onboardingCompletedAt: new Date().toISOString(),
-          },
-        });
-      } catch (err) {
-        console.error('[Ready] Clerk metadata update failed:', err);
-        // Continue anyway — try backend as backup
-      }
-    }
-
-    // 2. SECONDARY: Set Supabase flag via backend — for data consistency
+    // 1. PRIMARY: Set Clerk publicMetadata via backend API.
+    //    Client-side clerkUser.update() CANNOT set publicMetadata —
+    //    only the Clerk Backend API can, so we call our backend endpoint.
     try {
       const token = await getToken();
       await apiClient.post(
-        '/v1/user/onboarding',
-        {
-          display_name: displayName || 'Explorer',
-          username: '',
-          is_onboarded: true,
-          preferences: {
-            cuisine_preferences: [],
-            ambiance_preferences: [],
-            dietary_restrictions: [],
-            price_range: { min: 1, max: 3 },
-          },
-        },
+        '/v1/user/complete-onboarding',
+        {},
         { headers: token ? { Authorization: `Bearer ${token}` } : {} }
       );
-    } catch (e) {
-      console.warn('[Ready] Backend onboarding completion failed (non-blocking):', e);
+    } catch (err) {
+      console.error('[Ready] Backend onboarding completion failed:', err);
+      // Continue anyway — local state will still work for this session
+    }
+
+    // 2. Reload Clerk user so publicMetadata is fresh in memory
+    if (clerkUser?.reload) {
+      try {
+        await clerkUser.reload();
+      } catch {
+        // Non-blocking — local state update below handles this session
+      }
     }
 
     // 3. Update local state + Zustand store
@@ -144,7 +130,7 @@ const s = StyleSheet.create({
   },
   overlayTop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(29, 62, 145, 0.35)',
+    backgroundColor: 'rgba(5, 88, 232, 0.35)',
   },
   overlayBottom: {
     position: 'absolute',
