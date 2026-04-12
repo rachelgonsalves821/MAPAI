@@ -43,6 +43,9 @@ const DEV_USER: AuthUser = {
     role: 'authenticated',
 };
 
+// Cached Clerk client — initialized once per process/instance.
+let _clerkClient: any = null;
+
 // Log the auth mode once at startup so developers always know the posture.
 if (isDev && !requireAuth) {
     console.warn(
@@ -71,6 +74,7 @@ export async function authMiddleware(
             request.authMethod = 'dev-user';
             return;
         }
+        console.warn('[Auth] 401 — no Authorization header on', request.url);
         reply.status(401).send({
             error: {
                 type: 'AuthenticationError',
@@ -105,12 +109,15 @@ export async function authMiddleware(
     }
 
     // Strategy 1: Verify Clerk JWT using Clerk's JWKS (preferred)
+    // Client is cached at module level to avoid recreating it on every request.
     try {
         const clerkSecretKey = process.env.CLERK_SECRET_KEY;
         if (clerkSecretKey) {
-            const { createClerkClient } = await import('@clerk/clerk-sdk-node');
-            const clerk = createClerkClient({ secretKey: clerkSecretKey });
-            const decoded = await clerk.verifyToken(token);
+            if (!_clerkClient) {
+                const { createClerkClient } = await import('@clerk/clerk-sdk-node');
+                _clerkClient = createClerkClient({ secretKey: clerkSecretKey });
+            }
+            const decoded = await _clerkClient.verifyToken(token);
             request.user = {
                 id: decoded.sub,
                 email: (decoded as any).email,
@@ -119,7 +126,9 @@ export async function authMiddleware(
             request.authMethod = 'clerk-jwt';
             return;
         }
-    } catch {
+    } catch (clerkErr: any) {
+        // Log why Clerk verification failed — visible in Vercel function logs.
+        console.error('[Auth] Clerk verifyToken failed:', clerkErr?.message ?? clerkErr);
         // Fall through to manual JWT verification
     }
 
