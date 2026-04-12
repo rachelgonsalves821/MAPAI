@@ -37,6 +37,11 @@ async function main() {
     if (criticalErrors.length > 0) {
         console.error('FATAL: Server cannot start due to critical configuration errors:');
         criticalErrors.forEach((e) => console.error(`   - ${e}`));
+        // In serverless (Vercel) process.exit crashes the function mid-request.
+        // Throw instead so the error is captured and returned as a 500.
+        if (process.env.VERCEL) {
+            throw new Error(`Critical config errors: ${criticalErrors.join('; ')}`);
+        }
         process.exit(1);
     }
 
@@ -56,7 +61,10 @@ async function main() {
         methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     });
 
-    await app.register(websocket);
+    // WebSocket is not supported in Vercel serverless — skip registration there.
+    if (!process.env.VERCEL) {
+        await app.register(websocket);
+    }
 
     await app.register(rateLimit, {
         max: config.isDev ? 1000 : 100,

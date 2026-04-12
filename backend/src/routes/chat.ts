@@ -164,16 +164,18 @@ export async function chatRoutes(app: FastifyInstance) {
 
     /**
      * WebSocket /v1/chat/stream (Sprint 2 — streaming responses)
+     * Not registered on Vercel (serverless does not support WebSocket upgrades).
      */
-    app.get('/stream', { websocket: true }, (socket, _request) => {
-        socket.on('message', (rawMsg) => {
-            // Sprint 2: Implement streaming via WebSocket
-            socket.send(
-                JSON.stringify({
-                    type: 'info',
-                    data: 'Streaming not yet implemented. Use POST /v1/chat/message.',
-                })
-            );
+    if (!process.env.VERCEL) {
+        app.get('/stream', { websocket: true }, (socket, _request) => {
+            socket.on('message', (_rawMsg) => {
+                socket.send(
+                    JSON.stringify({
+                        type: 'info',
+                        data: 'Streaming not yet implemented. Use POST /v1/chat/message.',
+                    })
+                );
+            });
         });
-    });
+    }
 }

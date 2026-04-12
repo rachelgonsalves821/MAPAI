@@ -27,6 +27,16 @@ async function getHandler() {
 }
 
 export default async function (req: IncomingMessage, res: ServerResponse) {
-    const handle = await getHandler();
-    handle(req, res);
+    try {
+        const handle = await getHandler();
+        handle(req, res);
+    } catch (err: any) {
+        console.error('[api/index] Handler init failed:', err?.message ?? err);
+        if (!res.headersSent) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+                error: { type: 'StartupError', title: err?.message ?? 'Server failed to initialize', status: 500 },
+            }));
+        }
+    }
 }
