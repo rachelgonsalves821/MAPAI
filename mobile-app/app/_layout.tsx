@@ -156,6 +156,9 @@ export const unstable_settings = {
 SplashScreen.preventAutoHideAsync();
 
 const CLERK_KEY = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY || '';
+if (!CLERK_KEY) {
+  console.error('[Config] EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY is empty — Clerk will not initialize and auth will fail!');
+}
 
 // Single QueryClient instance — lives for the app lifetime.
 // staleTime 0 means data is always considered stale on re-mount (good for auth transitions).
@@ -184,14 +187,26 @@ function ApiTokenSync() {
 
   useEffect(() => {
     if (!user?.id) {
+      console.warn('[ApiTokenSync] No authenticated user — token cleared. CLERK_KEY set:', !!CLERK_KEY);
       setApiAuthToken(null);
       return;
     }
 
-    // Fetch initial token immediately
-    getToken().then(setApiAuthToken).catch(() => setApiAuthToken(null));
+    console.log('[ApiTokenSync] User signed in:', user.id.slice(0, 8) + '... — fetching token');
+    getToken()
+      .then((token) => {
+        if (token) {
+          console.log('[ApiTokenSync] Token acquired:', token.slice(0, 20) + '...');
+        } else {
+          console.warn('[ApiTokenSync] getToken() returned null — requests will 401');
+        }
+        setApiAuthToken(token);
+      })
+      .catch((err) => {
+        console.error('[ApiTokenSync] getToken() threw:', err?.message ?? err);
+        setApiAuthToken(null);
+      });
 
-    // Refresh token every 50 seconds (Clerk tokens expire in 60s)
     const interval = setInterval(() => {
       getToken().then(setApiAuthToken).catch(() => setApiAuthToken(null));
     }, 50_000);
