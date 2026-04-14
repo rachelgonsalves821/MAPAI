@@ -31,28 +31,33 @@ try {
   ClerkLoaded = ({ children }: any) => children;
 }
 
-// SecureStore token cache for Clerk session persistence
+// SecureStore token cache for Clerk session persistence.
+// expo-secure-store is native-only — on web its methods silently return null,
+// which causes Clerk to fail to save/restore sessions between renders.
+// Leave tokenCache undefined on web so Clerk uses its built-in cookie/storage.
 let tokenCache: any;
-try {
-  const SecureStore = require('expo-secure-store');
-  tokenCache = {
-    async getToken(key: string) {
-      try {
-        return await SecureStore.getItemAsync(key);
-      } catch {
-        return null;
-      }
-    },
-    async saveToken(key: string, value: string) {
-      try {
-        return await SecureStore.setItemAsync(key, value);
-      } catch {
-        return;
-      }
-    },
-  };
-} catch {
-  tokenCache = undefined;
+if (Platform.OS !== 'web') {
+  try {
+    const SecureStore = require('expo-secure-store');
+    tokenCache = {
+      async getToken(key: string) {
+        try {
+          return await SecureStore.getItemAsync(key);
+        } catch {
+          return null;
+        }
+      },
+      async saveToken(key: string, value: string) {
+        try {
+          return await SecureStore.setItemAsync(key, value);
+        } catch {
+          return;
+        }
+      },
+    };
+  } catch {
+    tokenCache = undefined;
+  }
 }
 
 /**
