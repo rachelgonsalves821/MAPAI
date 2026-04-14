@@ -15,11 +15,11 @@ const nodeEnv = process.env.NODE_ENV || '';
 export const isDev = nodeEnv === 'development';
 
 /**
- * Auth is ALWAYS required unless explicitly running in development mode
- * AND SKIP_AUTH=true is set. This ensures a missing NODE_ENV never
- * accidentally disables authentication.
+ * Auth is bypassed when SKIP_AUTH=true is set explicitly.
+ * Works regardless of NODE_ENV so it can be used on deployed environments
+ * (e.g. Vercel) without switching NODE_ENV to development.
  */
-export const requireAuth = !(isDev && process.env.SKIP_AUTH === 'true');
+export const requireAuth = process.env.SKIP_AUTH !== 'true';
 
 /** Allowed CORS origins. Parsed from comma-separated CORS_ORIGIN env var. */
 const DEFAULT_ORIGINS = ['http://localhost:3000', 'http://localhost:8081', 'http://localhost:8090'];

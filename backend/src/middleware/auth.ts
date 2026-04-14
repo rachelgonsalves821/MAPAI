@@ -47,10 +47,9 @@ const DEV_USER: AuthUser = {
 let _clerkClient: any = null;
 
 // Log the auth mode once at startup so developers always know the posture.
-if (isDev && !requireAuth) {
+if (!requireAuth) {
     console.warn(
-        '[Auth] Running in PERMISSIVE DEV mode — unauthenticated requests will receive a synthetic dev user. ' +
-        'Remove SKIP_AUTH=true to test production auth locally.'
+        '[Auth] Running in PERMISSIVE mode (SKIP_AUTH=true) — unauthenticated requests will receive a synthetic dev user.'
     );
 } else {
     console.info('[Auth] Auth ENFORCED — all requests require a valid JWT.');
@@ -69,7 +68,7 @@ export async function authMiddleware(
     // without any auth infrastructure.
     // In production / REQUIRE_AUTH mode: reject immediately.
     if (!request.headers.authorization) {
-        if (isDev && !requireAuth) {
+        if (!requireAuth) {
             request.user = DEV_USER;
             request.authMethod = 'dev-user';
             return;
@@ -186,7 +185,7 @@ export async function optionalAuth(
 ): Promise<void> {
     // No Authorization header.
     if (!request.headers.authorization) {
-        if (isDev && !requireAuth) {
+        if (!requireAuth) {
             request.user = DEV_USER;
             request.authMethod = 'dev-user';
         }
@@ -235,7 +234,7 @@ export async function optionalAuth(
         // Verification failed.  In permissive dev mode, fall back to dev user so
         // local development stays frictionless.  In production / REQUIRE_AUTH, leave
         // request.user undefined — the route handler decides whether to proceed.
-        if (isDev && !requireAuth) {
+        if (!requireAuth) {
             request.user = DEV_USER;
             request.authMethod = 'dev-user';
         }
