@@ -35,11 +35,19 @@ axiosRetry(apiClient, {
 });
 
 // ---------------------------------------------------------------------------
-// Auth token — set by AuthContext when Clerk provides a fresh token
+// Auth token — set by ApiTokenSync when Clerk provides a fresh token
 // ---------------------------------------------------------------------------
 let _authToken: string | null = null;
 export function setApiAuthToken(token: string | null) {
   _authToken = token;
+}
+
+// Live getter — registered by ApiTokenSync so the interceptor can call
+// getToken() directly if _authToken hasn't been set yet (race condition on
+// initial web load where Clerk session restoration is async).
+let _getToken: (() => Promise<string | null>) | null = null;
+export function setApiTokenGetter(fn: (() => Promise<string | null>) | null) {
+  _getToken = fn;
 }
 
 // ---------------------------------------------------------------------------
@@ -52,10 +60,22 @@ apiClient.interceptors.request.use(
       if (_authToken) {
         config.headers.Authorization = `Bearer ${_authToken}`;
       } else {
-        // Fallback: stored token (dev mode / guest)
-        const token = await AsyncStorage.getItem('auth_token');
-        if (token) {
-          config.headers.Authorization = `Bearer ${token}`;
+        // Race condition safety net: if _authToken hasn't been set yet by
+        // ApiTokenSync (e.g. Clerk session still restoring on web), call
+        // getToken() directly so we don't send a request without auth.
+        if (_getToken) {
+          const freshToken = await _getToken().catch(() => null);
+          if (freshToken) {
+            _authToken = freshToken; // Cache so next request skips the await
+            config.headers.Authorization = `Bearer ${freshToken}`;
+          }
+        }
+        // Final fallback: stored token (dev mode / guest)
+        if (!config.headers.Authorization) {
+          const token = await AsyncStorage.getItem('auth_token');
+          if (token) {
+            config.headers.Authorization = `Bearer ${token}`;
+          }
         }
       }
     } catch (error) {

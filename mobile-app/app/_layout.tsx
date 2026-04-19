@@ -17,7 +17,7 @@ import { LocationService } from '@/services/LocationService';
 import { useOnboardingMigration } from '@/hooks/useOnboardingMigration';
 import { CrashReporting } from '@/services/CrashReporting';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { setApiAuthToken } from '@/services/api/client';
+import { setApiAuthToken, setApiTokenGetter } from '@/services/api/client';
 
 // Clerk — wrapped for web dev compatibility
 let ClerkProvider: any;
@@ -186,9 +186,27 @@ function MigrationRunner() {
  * Keeps the API client's Bearer token in sync with Clerk auth state.
  * Without this, apiClient requests go out without Authorization headers
  * and the backend returns 401.
+ *
+ * Two-layer protection:
+ *  1. setApiTokenGetter — registers a live getToken() reference so the
+ *     request interceptor can call it directly on any request where
+ *     _authToken hasn't been set yet (race condition on web/cold starts).
+ *  2. setApiAuthToken — caches the resolved JWT so most requests skip
+ *     the async getToken() call entirely.
+ *
+ * getToken() can return null on web immediately after page load (Clerk
+ * is restoring the session from cookies asynchronously). We retry with
+ * exponential backoff rather than leaving _authToken null.
  */
 function ApiTokenSync() {
   const { user, getToken } = useAuth();
+
+  // Always keep a live getToken reference in the API client so the
+  // interceptor has a fallback even before the cached token is ready.
+  useEffect(() => {
+    setApiTokenGetter(user?.id ? getToken : null);
+    return () => setApiTokenGetter(null);
+  }, [user?.id, getToken]);
 
   useEffect(() => {
     if (!user?.id) {
@@ -198,25 +216,51 @@ function ApiTokenSync() {
     }
 
     console.log('[ApiTokenSync] User signed in:', user.id.slice(0, 8) + '... — fetching token');
-    getToken()
-      .then((token) => {
+
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    // Fetch token with exponential-backoff retry when getToken() returns
+    // null (Clerk session not yet restored from cookies on web).
+    const fetchToken = async (attempt: number = 0) => {
+      if (cancelled) return;
+      try {
+        const token = await getToken();
+        if (cancelled) return;
         if (token) {
           console.log('[ApiTokenSync] Token acquired:', token.slice(0, 20) + '...');
+          setApiAuthToken(token);
         } else {
-          console.warn('[ApiTokenSync] getToken() returned null — requests will 401');
+          console.warn(
+            `[ApiTokenSync] getToken() returned null (attempt ${attempt + 1}/5) — requests will 401`
+          );
+          if (attempt < 4) {
+            // 500 ms → 1 s → 2 s → 4 s
+            const delay = Math.min(500 * Math.pow(2, attempt), 4000);
+            retryTimer = setTimeout(() => fetchToken(attempt + 1), delay);
+          } else {
+            console.warn('[ApiTokenSync] All retry attempts exhausted — auth header will be missing');
+            setApiAuthToken(null);
+          }
         }
-        setApiAuthToken(token);
-      })
-      .catch((err) => {
+      } catch (err: any) {
+        if (cancelled) return;
         console.error('[ApiTokenSync] getToken() threw:', err?.message ?? err);
         setApiAuthToken(null);
-      });
+      }
+    };
+
+    fetchToken();
 
     const interval = setInterval(() => {
       getToken().then(setApiAuthToken).catch(() => setApiAuthToken(null));
     }, 50_000);
 
-    return () => clearInterval(interval);
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      clearInterval(interval);
+    };
   }, [user?.id, getToken]);
 
   return null;

@@ -139,10 +139,15 @@ export async function authMiddleware(
             // No secret available — decide based on auth posture.
             if (requireAuth) {
                 // Production or explicit REQUIRE_AUTH: never allow silent fallback.
+                // Include a hint so the 401 response reveals the actual problem
+                // (both Clerk and Supabase fallback are unavailable).
+                const clerkConfigured = !!process.env.CLERK_SECRET_KEY;
                 reply.status(401).send({
                     error: {
                         type: 'AuthenticationError',
-                        title: 'Authentication service not configured',
+                        title: clerkConfigured
+                            ? 'Clerk JWT verification failed and no fallback secret is configured'
+                            : 'CLERK_SECRET_KEY is not set — cannot verify JWTs',
                         status: 401,
                     },
                 });
