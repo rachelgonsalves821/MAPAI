@@ -4,6 +4,7 @@ import axiosRetry from 'axios-retry';
 import { CrashReporting } from '../CrashReporting';
 import { showApiError, onUnauthorized } from './errorHandler';
 import { BACKEND_URL } from '@/constants/api';
+import { supabase } from '@/services/supabase';
 
 const apiClient: AxiosInstance = axios.create({
   baseURL: BACKEND_URL,
@@ -35,16 +36,16 @@ axiosRetry(apiClient, {
 });
 
 // ---------------------------------------------------------------------------
-// Auth token — set by ApiTokenSync when Clerk provides a fresh token
+// Auth token — legacy cache kept for backwards compatibility with ApiTokenSync
+// in _layout.tsx. The interceptor now calls supabase.auth.getSession() directly
+// as the primary source, so these exports are effectively no-ops but remain to
+// avoid breaking existing imports.
 // ---------------------------------------------------------------------------
 let _authToken: string | null = null;
 export function setApiAuthToken(token: string | null) {
   _authToken = token;
 }
 
-// Live getter — registered by ApiTokenSync so the interceptor can call
-// getToken() directly if _authToken hasn't been set yet (race condition on
-// initial web load where Clerk session restoration is async).
 let _getToken: (() => Promise<string | null>) | null = null;
 export function setApiTokenGetter(fn: (() => Promise<string | null>) | null) {
   _getToken = fn;
@@ -52,34 +53,43 @@ export function setApiTokenGetter(fn: (() => Promise<string | null>) | null) {
 
 // ---------------------------------------------------------------------------
 // Request interceptor: inject auth token + per-endpoint overrides
+//
+// Token resolution order:
+//  1. supabase.auth.getSession() — primary. supabase-js keeps the session in
+//     memory and auto-refreshes before expiry, so this is cheap and always
+//     returns the freshest token.
+//  2. _authToken cache — fallback if supabase returned null (e.g. guest mode
+//     where ApiTokenSync has pushed a custom token).
+//  3. AsyncStorage 'auth_token' — legacy fallback for dev tokens.
 // ---------------------------------------------------------------------------
 apiClient.interceptors.request.use(
   async (config: InternalAxiosRequestConfig) => {
-    // Auth token injection
     try {
-      if (_authToken) {
-        config.headers.Authorization = `Bearer ${_authToken}`;
+      let token: string | null = null;
+
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        token = session?.access_token ?? null;
+      } catch (e) {
+        console.warn('[API] supabase.auth.getSession() threw:', e);
+      }
+
+      if (!token && _authToken) token = _authToken;
+      if (!token && _getToken) token = await _getToken().catch(() => null);
+      if (!token) token = await AsyncStorage.getItem('auth_token');
+
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+        console.log(
+          `[API] ${config.method?.toUpperCase()} ${config.url} token=${token.slice(0, 20)}...`
+        );
       } else {
-        // Race condition safety net: if _authToken hasn't been set yet by
-        // ApiTokenSync (e.g. Clerk session still restoring on web), call
-        // getToken() directly so we don't send a request without auth.
-        if (_getToken) {
-          const freshToken = await _getToken().catch(() => null);
-          if (freshToken) {
-            _authToken = freshToken; // Cache so next request skips the await
-            config.headers.Authorization = `Bearer ${freshToken}`;
-          }
-        }
-        // Final fallback: stored token (dev mode / guest)
-        if (!config.headers.Authorization) {
-          const token = await AsyncStorage.getItem('auth_token');
-          if (token) {
-            config.headers.Authorization = `Bearer ${token}`;
-          }
-        }
+        console.warn(
+          `[API] ${config.method?.toUpperCase()} ${config.url} — NO TOKEN available`
+        );
       }
     } catch (error) {
-      console.error('Error retrieving auth token:', error);
+      console.error('[API] Error retrieving auth token:', error);
     }
 
     // LLM calls can take longer — extend the timeout to 30 seconds.
