@@ -65,6 +65,11 @@ export const config = {
     gemini: {
         apiKey: process.env.GOOGLE_GEMINI_API_KEY || '',
         model: optionalEnv('GEMINI_MODEL', 'gemini-2.5-flash-lite'),
+        // Optional: if primary model is exhausted with retryable errors, fall
+        // back to this model once before bubbling to the provider-level
+        // Gemini → Claude fallback. Set GEMINI_FALLBACK_MODEL=gemini-2.5-flash
+        // (the non-lite variant) to tap a different capacity pool on 503s.
+        fallbackModel: optionalEnv('GEMINI_FALLBACK_MODEL', ''),
     },
 
     // Google Places

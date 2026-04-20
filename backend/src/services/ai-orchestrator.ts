@@ -15,6 +15,7 @@ import { config } from '../config.js';
 import { getSupabase, hasDatabase } from '../db/supabase-client.js';
 import { v4 as uuid } from 'uuid';
 import { ChatService } from './chat-service.js';
+import { withGeminiRetry } from '../lib/gemini-retry.js';
 
 interface ChatInput {
     message: string;
@@ -284,9 +285,16 @@ export class AiOrchestrator {
      */
     async generateFocused(prompt: string): Promise<string> {
         if (this.geminiClient) {
-            const model = this.geminiClient.getGenerativeModel({ model: config.gemini.model });
-            const result = await model.generateContent(prompt);
-            return result.response.text().trim();
+            try {
+                return await withGeminiRetry(this.geminiClient, async (client, modelName) => {
+                    const model = client.getGenerativeModel({ model: modelName });
+                    const result = await model.generateContent(prompt);
+                    return result.response.text().trim();
+                });
+            } catch (e) {
+                console.warn('[AI] generateFocused: Gemini exhausted, trying Anthropic', (e as Error).message);
+                // Fall through to Anthropic below
+            }
         }
         if (this.anthropicClient) {
             const result = await this.anthropicClient.messages.create({
@@ -300,41 +308,39 @@ export class AiOrchestrator {
     }
 
     private async callGemini(systemPrompt: string, messages: SessionMessage[]): Promise<string> {
-        const model = this.geminiClient!.getGenerativeModel({
-            model: config.gemini.model,
-            systemInstruction: systemPrompt,
-        });
+        return await withGeminiRetry(this.geminiClient!, async (client, modelName) => {
+            const model = client.getGenerativeModel({
+                model: modelName,
+                systemInstruction: systemPrompt,
+            });
 
-        // Build history from all messages except the last (which is sent as the new turn).
-        // Gemini requires history to start with a 'user' turn and strictly alternate —
-        // drop any leading 'model' turns to avoid a 400 error.
-        const rawHistory = messages.slice(0, -1).map((m) => ({
-            role: m.role === 'assistant' ? 'model' as const : 'user' as const,
-            parts: [{ text: m.content }],
-        }));
-        const firstUserIdx = rawHistory.findIndex((m) => m.role === 'user');
-        const history = firstUserIdx > 0 ? rawHistory.slice(firstUserIdx) : rawHistory;
+            // Build history from all messages except the last (which is sent as the new turn).
+            // Gemini requires history to start with a 'user' turn and strictly alternate —
+            // drop any leading 'model' turns to avoid a 400 error.
+            const rawHistory = messages.slice(0, -1).map((m) => ({
+                role: m.role === 'assistant' ? 'model' as const : 'user' as const,
+                parts: [{ text: m.content }],
+            }));
+            const firstUserIdx = rawHistory.findIndex((m) => m.role === 'user');
+            const history = firstUserIdx > 0 ? rawHistory.slice(firstUserIdx) : rawHistory;
 
-        const lastMessage = messages[messages.length - 1].content;
-        const chat = model.startChat({ history });
+            const lastMessage = messages[messages.length - 1].content;
+            const chat = model.startChat({ history });
 
-        // Belt-and-suspenders timeout: AbortController cancels the fetch; Promise.race
-        // covers mid-stream body stalls that AbortController alone cannot cancel.
-        const controller = new AbortController();
-        const timeoutPromise = new Promise<never>((_, reject) =>
-            setTimeout(() => { controller.abort(); reject(new Error('Gemini call timed out after 20s')); }, 20_000)
-        );
+            // Belt-and-suspenders timeout: AbortController cancels the fetch; Promise.race
+            // covers mid-stream body stalls that AbortController alone cannot cancel.
+            // Budget is per-attempt — each retry gets a fresh 20s.
+            const controller = new AbortController();
+            const timeoutPromise = new Promise<never>((_, reject) =>
+                setTimeout(() => { controller.abort(); reject(new Error('Gemini call timed out after 20s')); }, 20_000)
+            );
 
-        try {
             const result = await Promise.race([
                 chat.sendMessage(lastMessage, { signal: controller.signal }),
                 timeoutPromise,
             ]);
             return result.response.text();
-        } finally {
-            // AbortController timer is already cleared when timeoutPromise fires;
-            // this is a no-op in the success path but safe to call regardless.
-        }
+        });
     }
 
     private async callClaude(systemPrompt: string, messages: SessionMessage[]): Promise<string> {
@@ -645,9 +651,11 @@ Return ONLY the JSON array:`;
             let extracted: Array<{ dimension: string; value: string; confidence: number }>;
 
             if (this.provider === 'gemini' && this.geminiClient) {
-                const model = this.geminiClient.getGenerativeModel({ model: config.gemini.model });
-                const result = await model.generateContent(extractionPrompt);
-                const text = result.response.text().replace(/```json|```/g, '').trim();
+                const text = await withGeminiRetry(this.geminiClient, async (client, modelName) => {
+                    const model = client.getGenerativeModel({ model: modelName });
+                    const result = await model.generateContent(extractionPrompt);
+                    return result.response.text().replace(/```json|```/g, '').trim();
+                });
                 extracted = JSON.parse(text);
             } else if (this.anthropicClient) {
                 const result = await this.anthropicClient.messages.create({
@@ -729,9 +737,11 @@ Return ONLY the two lines, no labels, no quotes:`;
         try {
             let rawOutput: string;
             if (this.provider === 'gemini' && this.geminiClient) {
-                const model = this.geminiClient.getGenerativeModel({ model: config.gemini.model });
-                const result = await model.generateContent(prompt);
-                rawOutput = result.response.text().trim();
+                rawOutput = await withGeminiRetry(this.geminiClient, async (client, modelName) => {
+                    const model = client.getGenerativeModel({ model: modelName });
+                    const result = await model.generateContent(prompt);
+                    return result.response.text().trim();
+                });
             } else if (this.anthropicClient) {
                 const result = await this.anthropicClient.messages.create({
                     model: config.anthropic.model,
