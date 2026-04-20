@@ -1,14 +1,14 @@
 /**
  * Mapai — Root Layout
- * ClerkProvider → QueryClientProvider → AuthProvider → Stack Navigator.
+ * QueryClientProvider → AuthProvider → Stack Navigator.
  * Route guard in AuthContext handles nav between auth and main screens.
  */
 
 import { Stack, usePathname } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import React, { Component, useEffect, useRef, useState } from 'react';
-import { View, Text, ActivityIndicator, Platform, TouchableOpacity, StyleSheet as RNStyleSheet } from 'react-native';
+import React, { Component, useEffect, useRef } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet as RNStyleSheet } from 'react-native';
 import { AuthProvider } from '@/context/AuthContext';
 import { useAuth } from '@/context/AuthContext';
 import { useOnboardingStore } from '@/store/onboardingStore';
@@ -18,77 +18,6 @@ import { useOnboardingMigration } from '@/hooks/useOnboardingMigration';
 import { CrashReporting } from '@/services/CrashReporting';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { setApiAuthToken, setApiTokenGetter } from '@/services/api/client';
-
-// Clerk — wrapped for web dev compatibility
-let ClerkProvider: any;
-let ClerkLoaded: any;
-try {
-  const clerk = require('@clerk/clerk-expo');
-  ClerkProvider = clerk.ClerkProvider;
-  ClerkLoaded = clerk.ClerkLoaded;
-} catch {
-  ClerkProvider = ({ children }: any) => children;
-  ClerkLoaded = ({ children }: any) => children;
-}
-
-// SecureStore token cache for Clerk session persistence.
-// expo-secure-store is native-only — on web its methods silently return null,
-// which causes Clerk to fail to save/restore sessions between renders.
-// Leave tokenCache undefined on web so Clerk uses its built-in cookie/storage.
-let tokenCache: any;
-if (Platform.OS !== 'web') {
-  try {
-    const SecureStore = require('expo-secure-store');
-    tokenCache = {
-      async getToken(key: string) {
-        try {
-          return await SecureStore.getItemAsync(key);
-        } catch {
-          return null;
-        }
-      },
-      async saveToken(key: string, value: string) {
-        try {
-          return await SecureStore.setItemAsync(key, value);
-        } catch {
-          return;
-        }
-      },
-    };
-  } catch {
-    tokenCache = undefined;
-  }
-}
-
-/**
- * Wraps ClerkLoaded with a timeout fallback so the app doesn't show a blank
- * screen if Clerk takes too long to initialize on web.
- */
-function ClerkLoadedOrFallback({ children }: { children: React.ReactNode }) {
-  // ClerkLoaded from @clerk/clerk-expo never fires on web — bypass it
-  if (Platform.OS === 'web') {
-    return <>{children}</>;
-  }
-
-  const [timedOut, setTimedOut] = useState(false);
-
-  useEffect(() => {
-    const timer = setTimeout(() => setTimedOut(true), 5000);
-    return () => clearTimeout(timer);
-  }, []);
-
-  return (
-    <>
-      <ClerkLoaded>{children}</ClerkLoaded>
-      {timedOut && (
-        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff', zIndex: -1 }}>
-          <ActivityIndicator size="large" color="#0558E8" />
-          <Text style={{ marginTop: 16, fontSize: 15, color: '#6B7280' }}>Loading Mapai...</Text>
-        </View>
-      )}
-    </>
-  );
-}
 
 /**
  * Custom error boundary — shown when a route component crashes.
@@ -160,13 +89,7 @@ export const unstable_settings = {
 
 SplashScreen.preventAutoHideAsync();
 
-const CLERK_KEY = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY || '';
-if (!CLERK_KEY) {
-  console.error('[Config] EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY is empty — Clerk will not initialize and auth will fail!');
-}
-
 // Single QueryClient instance — lives for the app lifetime.
-// staleTime 0 means data is always considered stale on re-mount (good for auth transitions).
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -183,26 +106,17 @@ function MigrationRunner() {
 }
 
 /**
- * Keeps the API client's Bearer token in sync with Clerk auth state.
- * Without this, apiClient requests go out without Authorization headers
- * and the backend returns 401.
+ * Keeps the API client's Bearer token in sync with Supabase session.
+ * Uses getToken() from AuthContext which returns supabase session.access_token.
  *
  * Two-layer protection:
- *  1. setApiTokenGetter — registers a live getToken() reference so the
- *     request interceptor can call it directly on any request where
- *     _authToken hasn't been set yet (race condition on web/cold starts).
- *  2. setApiAuthToken — caches the resolved JWT so most requests skip
- *     the async getToken() call entirely.
- *
- * getToken() can return null on web immediately after page load (Clerk
- * is restoring the session from cookies asynchronously). We retry with
- * exponential backoff rather than leaving _authToken null.
+ *  1. setApiTokenGetter — live reference so the request interceptor can call
+ *     getToken() directly for any request where _authToken hasn't been set yet.
+ *  2. setApiAuthToken — caches the resolved JWT so most requests skip the await.
  */
 function ApiTokenSync() {
   const { user, getToken } = useAuth();
 
-  // Always keep a live getToken reference in the API client so the
-  // interceptor has a fallback even before the cached token is ready.
   useEffect(() => {
     setApiTokenGetter(user?.id ? getToken : null);
     return () => setApiTokenGetter(null);
@@ -210,48 +124,34 @@ function ApiTokenSync() {
 
   useEffect(() => {
     if (!user?.id) {
-      console.warn('[ApiTokenSync] No authenticated user — token cleared. CLERK_KEY set:', !!CLERK_KEY);
       setApiAuthToken(null);
       return;
     }
 
-    console.log('[ApiTokenSync] User signed in:', user.id.slice(0, 8) + '... — fetching token');
-
     let cancelled = false;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
-    // Fetch token with exponential-backoff retry when getToken() returns
-    // null (Clerk session not yet restored from cookies on web).
     const fetchToken = async (attempt: number = 0) => {
       if (cancelled) return;
       try {
         const token = await getToken();
         if (cancelled) return;
         if (token) {
-          console.log('[ApiTokenSync] Token acquired:', token.slice(0, 20) + '...');
           setApiAuthToken(token);
+        } else if (attempt < 4) {
+          const delay = Math.min(500 * Math.pow(2, attempt), 4000);
+          retryTimer = setTimeout(() => fetchToken(attempt + 1), delay);
         } else {
-          console.warn(
-            `[ApiTokenSync] getToken() returned null (attempt ${attempt + 1}/5) — requests will 401`
-          );
-          if (attempt < 4) {
-            // 500 ms → 1 s → 2 s → 4 s
-            const delay = Math.min(500 * Math.pow(2, attempt), 4000);
-            retryTimer = setTimeout(() => fetchToken(attempt + 1), delay);
-          } else {
-            console.warn('[ApiTokenSync] All retry attempts exhausted — auth header will be missing');
-            setApiAuthToken(null);
-          }
+          setApiAuthToken(null);
         }
-      } catch (err: any) {
-        if (cancelled) return;
-        console.error('[ApiTokenSync] getToken() threw:', err?.message ?? err);
-        setApiAuthToken(null);
+      } catch {
+        if (!cancelled) setApiAuthToken(null);
       }
     };
 
     fetchToken();
 
+    // Refresh token periodically (Supabase auto-refreshes, but keep cache warm)
     const interval = setInterval(() => {
       getToken().then(setApiAuthToken).catch(() => setApiAuthToken(null));
     }, 50_000);
@@ -267,23 +167,18 @@ function ApiTokenSync() {
 }
 
 /**
- * Clears the React Query user memory cache whenever the authenticated user
- * changes (sign-in, sign-out, or account switch). This ensures the next
- * useUserMemory() call fetches fresh data for the current user instead of
- * serving a previous user's cached preferences.
+ * Clears the React Query user memory cache whenever the authenticated user changes.
  */
 function MemoryCacheWatcher() {
   const { user } = useAuth();
   const prevUserIdRef = useRef<string | null | undefined>(undefined);
 
   useEffect(() => {
-    // undefined → not yet resolved; skip
     if (prevUserIdRef.current === undefined) {
       prevUserIdRef.current = user?.id ?? null;
       return;
     }
 
-    // User changed (sign-out sets null; sign-in sets a new id)
     if (prevUserIdRef.current !== (user?.id ?? null)) {
       queryClient.removeQueries({ queryKey: ['user', 'memory'] });
       prevUserIdRef.current = user?.id ?? null;
@@ -294,8 +189,7 @@ function MemoryCacheWatcher() {
 }
 
 /**
- * Watches Clerk auth state and pathname inside AuthProvider context.
- * Keeps Sentry user context and screen tags in sync without touching RootLayout.
+ * Keeps Sentry user context and screen tags in sync with auth state.
  */
 function CrashReportingWatcher() {
   const { user } = useAuth();
@@ -330,114 +224,110 @@ export default function RootLayout() {
   return (
     <AppErrorBoundary>
     <QueryClientProvider client={queryClient}>
-    <ClerkProvider publishableKey={CLERK_KEY} tokenCache={tokenCache}>
-      <ClerkLoadedOrFallback>
-        <AuthProvider>
-          <MigrationRunner />
-          <ApiTokenSync />
-          <MemoryCacheWatcher />
-          <CrashReportingWatcher />
-          <StatusBar style="dark" />
-          <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="(auth)" options={{ animation: 'none' }} />
-            <Stack.Screen name="sso-callback" options={{ animation: 'none' }} />
-            <Stack.Screen name="home" options={{ animation: 'none' }} />
-            <Stack.Screen
-              name="chat"
-              options={{
-                animation: 'slide_from_bottom',
-                presentation: 'modal',
-                gestureEnabled: true,
-              }}
-            />
-            <Stack.Screen
-              name="profile"
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="chat-history"
-              options={{
-                animation: 'slide_from_right',
-                presentation: 'modal',
-              }}
-            />
-            <Stack.Screen
-              name="place/[id]"
-              options={{
-                animation: 'slide_from_bottom',
-                presentation: 'modal',
-              }}
-            />
-            <Stack.Screen
-              name="transport/[placeId]"
-              options={{
-                animation: 'slide_from_bottom',
-                presentation: 'modal',
-              }}
-            />
-            <Stack.Screen
-              name="u/[username]"
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="settings"
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="social"
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="rewards"
-              options={{ animation: 'slide_from_right' }}
-            />
-            <Stack.Screen
-              name="planning/[id]"
-              options={{
-                animation: 'slide_from_bottom',
-                presentation: 'modal',
-              }}
-            />
-            <Stack.Screen
-              name="preference-detail"
-              options={{
-                headerShown: false,
-                animation: 'slide_from_right',
-                presentation: 'card',
-              }}
-            />
-            <Stack.Screen
-              name="add-friends"
-              options={{
-                headerShown: false,
-                animation: 'slide_from_right',
-              }}
-            />
-            <Stack.Screen
-              name="friend-requests"
-              options={{
-                headerShown: false,
-                animation: 'slide_from_right',
-              }}
-            />
-            <Stack.Screen
-              name="loved-places"
-              options={{
-                headerShown: false,
-                animation: 'slide_from_right',
-              }}
-            />
-            <Stack.Screen
-              name="compare"
-              options={{
-                animation: 'slide_from_bottom',
-                presentation: 'modal',
-              }}
-            />
-          </Stack>
-        </AuthProvider>
-      </ClerkLoadedOrFallback>
-    </ClerkProvider>
+      <AuthProvider>
+        <MigrationRunner />
+        <ApiTokenSync />
+        <MemoryCacheWatcher />
+        <CrashReportingWatcher />
+        <StatusBar style="dark" />
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="(auth)" options={{ animation: 'none' }} />
+          <Stack.Screen name="sso-callback" options={{ animation: 'none' }} />
+          <Stack.Screen name="home" options={{ animation: 'none' }} />
+          <Stack.Screen
+            name="chat"
+            options={{
+              animation: 'slide_from_bottom',
+              presentation: 'modal',
+              gestureEnabled: true,
+            }}
+          />
+          <Stack.Screen
+            name="profile"
+            options={{ animation: 'slide_from_right' }}
+          />
+          <Stack.Screen
+            name="chat-history"
+            options={{
+              animation: 'slide_from_right',
+              presentation: 'modal',
+            }}
+          />
+          <Stack.Screen
+            name="place/[id]"
+            options={{
+              animation: 'slide_from_bottom',
+              presentation: 'modal',
+            }}
+          />
+          <Stack.Screen
+            name="transport/[placeId]"
+            options={{
+              animation: 'slide_from_bottom',
+              presentation: 'modal',
+            }}
+          />
+          <Stack.Screen
+            name="u/[username]"
+            options={{ animation: 'slide_from_right' }}
+          />
+          <Stack.Screen
+            name="settings"
+            options={{ animation: 'slide_from_right' }}
+          />
+          <Stack.Screen
+            name="social"
+            options={{ animation: 'slide_from_right' }}
+          />
+          <Stack.Screen
+            name="rewards"
+            options={{ animation: 'slide_from_right' }}
+          />
+          <Stack.Screen
+            name="planning/[id]"
+            options={{
+              animation: 'slide_from_bottom',
+              presentation: 'modal',
+            }}
+          />
+          <Stack.Screen
+            name="preference-detail"
+            options={{
+              headerShown: false,
+              animation: 'slide_from_right',
+              presentation: 'card',
+            }}
+          />
+          <Stack.Screen
+            name="add-friends"
+            options={{
+              headerShown: false,
+              animation: 'slide_from_right',
+            }}
+          />
+          <Stack.Screen
+            name="friend-requests"
+            options={{
+              headerShown: false,
+              animation: 'slide_from_right',
+            }}
+          />
+          <Stack.Screen
+            name="loved-places"
+            options={{
+              headerShown: false,
+              animation: 'slide_from_right',
+            }}
+          />
+          <Stack.Screen
+            name="compare"
+            options={{
+              animation: 'slide_from_bottom',
+              presentation: 'modal',
+            }}
+          />
+        </Stack>
+      </AuthProvider>
     </QueryClientProvider>
     </AppErrorBoundary>
   );

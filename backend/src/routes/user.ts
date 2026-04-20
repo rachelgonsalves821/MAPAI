@@ -79,9 +79,7 @@ export async function userRoutes(app: FastifyInstance) {
 
     /**
      * POST /v1/user/complete-onboarding
-     * Sets Clerk publicMetadata.onboardingCompleted = true via Backend API.
-     * Client-side clerkUser.update() CANNOT set publicMetadata — only the
-     * Backend API can do this, so the mobile app calls this endpoint.
+     * Marks onboarding as complete in user_profiles.
      */
     app.post('/complete-onboarding', {
         preHandler: authMiddleware,
@@ -89,19 +87,6 @@ export async function userRoutes(app: FastifyInstance) {
             const userId = request.user!.id;
 
             try {
-                const clerkSecretKey = process.env.CLERK_SECRET_KEY;
-                if (clerkSecretKey) {
-                    const { createClerkClient } = await import('@clerk/clerk-sdk-node');
-                    const clerk = createClerkClient({ secretKey: clerkSecretKey });
-                    await clerk.users.updateUser(userId, {
-                        publicMetadata: {
-                            onboardingCompleted: true,
-                            onboardingCompletedAt: new Date().toISOString(),
-                        },
-                    });
-                }
-
-                // Also update Supabase profile
                 if (hasDatabase()) {
                     const supabase = getSupabase()!;
                     await (supabase.from('user_profiles') as any)
@@ -111,7 +96,7 @@ export async function userRoutes(app: FastifyInstance) {
 
                 return envelope({ success: true, onboardingCompleted: true });
             } catch (error: any) {
-                app.log.error(error, 'Failed to complete onboarding metadata');
+                app.log.error(error, 'Failed to complete onboarding');
                 return reply.status(500).send(
                     errorResponse(500, 'Failed to update onboarding status', 'ServerError')
                 );

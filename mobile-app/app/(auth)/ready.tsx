@@ -28,7 +28,7 @@ const NAVY = '#0558E8';
 export default function ReadyScreen() {
   const router = useRouter();
   const { displayName, selectedFriends, complete } = useOnboardingStore();
-  const { getToken, updateUser, clerkUser } = useAuth();
+  const { getToken, updateUser } = useAuth();
 
   const friendCount = selectedFriends.length;
   const friendSubtitle =
@@ -41,9 +41,7 @@ export default function ReadyScreen() {
   const resolvedName = displayName || 'Explorer';
 
   async function handleOpenMap() {
-    // 1. PRIMARY: Set Clerk publicMetadata via backend API.
-    //    Client-side clerkUser.update() CANNOT set publicMetadata —
-    //    only the Clerk Backend API can, so we call our backend endpoint.
+    // Mark onboarding complete on the backend (updates user_profiles.is_onboarded)
     try {
       const token = await getToken();
       await apiClient.post(
@@ -53,23 +51,14 @@ export default function ReadyScreen() {
       );
     } catch (err) {
       console.error('[Ready] Backend onboarding completion failed:', err);
-      // Continue anyway — local state will still work for this session
+      // Continue anyway — local state update below handles this session
     }
 
-    // 2. Reload Clerk user so publicMetadata is fresh in memory
-    if (clerkUser?.reload) {
-      try {
-        await clerkUser.reload();
-      } catch {
-        // Non-blocking — local state update below handles this session
-      }
-    }
-
-    // 3. Update local state + Zustand store
+    // Update local state + Zustand store
     complete();
     updateUser({ onboardingComplete: true });
 
-    // 4. Navigate — replace() clears the auth stack entirely
+    // Navigate — replace() clears the auth stack entirely
     router.replace('/home');
   }
 

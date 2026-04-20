@@ -1,27 +1,18 @@
 /**
- * Mapai — Auth Context (Clerk)
+ * Mapai — Auth Context (Supabase)
  *
- * Routing logic uses Clerk's publicMetadata.onboardingCompleted —
- * this is SYNCHRONOUS once Clerk loads, no DB call needed.
+ * Supabase Auth replaces Clerk.
+ * Session JWTs come from supabase.auth.getSession().
+ * Onboarding status is loaded from user_profiles.is_onboarded.
  *
- * Guest mode sets a local user object that bypasses Clerk entirely.
+ * Guest mode sets a local user object that bypasses Supabase entirely.
  */
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useRouter, useSegments } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
-// Clerk imports — wrapped for web/dev compatibility
-let useClerkAuth: any;
-let useClerkUser: any;
-try {
-  const clerk = require('@clerk/clerk-expo');
-  useClerkAuth = clerk.useAuth;
-  useClerkUser = clerk.useUser;
-} catch {
-  useClerkAuth = () => ({ isSignedIn: false, isLoaded: true, signOut: async () => {}, getToken: async () => null });
-  useClerkUser = () => ({ user: null, isLoaded: true });
-}
+import type { Session, User as SupabaseUser } from '@supabase/supabase-js';
+import { supabase } from '@/services/supabase';
 
 interface User {
   id: string;
@@ -38,47 +29,91 @@ interface AuthContextType {
   isLoading: boolean;
   signOut: () => Promise<void>;
   updateUser: (updates: Partial<User>) => void;
-  getToken: (options?: { template?: string }) => Promise<string | null>;
-  /** Direct access to Clerk user object for publicMetadata updates */
-  clerkUser: any;
+  getToken: () => Promise<string | null>;
+  /** Direct access to Supabase user object */
+  supabaseUser: SupabaseUser | null;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const GUEST_STORAGE_KEY = 'mapai_guest_user';
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const { isSignedIn, isLoaded: authLoaded, signOut: clerkSignOut, getToken } = useClerkAuth();
-  const { user: clerkUser, isLoaded: userLoaded } = useClerkUser();
+async function loadUserProfile(userId: string, sbUser: SupabaseUser): Promise<User> {
+  try {
+    const { data } = await supabase
+      .from('user_profiles')
+      .select('display_name, username, avatar_url, is_onboarded')
+      .eq('clerk_user_id', userId)
+      .maybeSingle();
 
+    return {
+      id: userId,
+      email: sbUser.email,
+      displayName:
+        data?.display_name ||
+        sbUser.user_metadata?.full_name ||
+        sbUser.user_metadata?.name ||
+        undefined,
+      username: data?.username || undefined,
+      avatarUrl: data?.avatar_url || sbUser.user_metadata?.avatar_url || undefined,
+      onboardingComplete: data?.is_onboarded === true,
+      isGuest: false,
+    };
+  } catch {
+    return {
+      id: userId,
+      email: sbUser.email,
+      displayName:
+        sbUser.user_metadata?.full_name || sbUser.user_metadata?.name || undefined,
+      onboardingComplete: false,
+      isGuest: false,
+    };
+  }
+}
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [supabaseUser, setSupabaseUser] = useState<SupabaseUser | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
   const segments = useSegments();
 
-  // ─── Sync Clerk user → local state (NO async DB call) ───
   useEffect(() => {
-    if (!authLoaded || !userLoaded) return;
-
-    if (isSignedIn && clerkUser) {
-      // Read onboarding status from Clerk publicMetadata — SYNCHRONOUS
-      const onboardingComplete = clerkUser.publicMetadata?.onboardingCompleted === true;
-
-      setUser({
-        id: clerkUser.id,
-        email: clerkUser.primaryEmailAddress?.emailAddress,
-        displayName: clerkUser.fullName ?? clerkUser.firstName ?? undefined,
-        username: clerkUser.username ?? undefined,
-        avatarUrl: clerkUser.imageUrl,
-        onboardingComplete,
-        isGuest: false,
-      });
+    // Load initial session
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      setSession(session);
+      if (session?.user) {
+        setSupabaseUser(session.user);
+        const profile = await loadUserProfile(session.user.id, session.user);
+        setUser(profile);
+      } else {
+        await loadGuestUser();
+      }
       setIsLoading(false);
-    } else {
-      // Not signed in with Clerk — check for guest user
-      loadGuestUser();
-    }
-  }, [isSignedIn, authLoaded, userLoaded, clerkUser?.id, clerkUser?.publicMetadata?.onboardingCompleted]);
+    });
+
+    // Subscribe to auth state changes
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      setSession(session);
+      if (session?.user) {
+        setSupabaseUser(session.user);
+        const profile = await loadUserProfile(session.user.id, session.user);
+        setUser(profile);
+        setIsLoading(false);
+      } else if (event === 'SIGNED_OUT') {
+        setSupabaseUser(null);
+        setSession(null);
+        await AsyncStorage.removeItem(GUEST_STORAGE_KEY);
+        setUser(null);
+        setIsLoading(false);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   async function loadGuestUser() {
     try {
@@ -91,10 +126,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch {
       setUser(null);
     }
-    setIsLoading(false);
   }
 
-  // ─── Route guard — SYNCHRONOUS, no DB calls ───
+  // ─── Route guard — runs after auth state resolves ───
   useEffect(() => {
     if (isLoading) return;
 
@@ -105,20 +139,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (onSSOCallback) return;
 
     if (!user) {
-      // No user → go to landing (only if not already there)
       if (!inAuthGroup) {
         router.replace('/(auth)/landing');
       }
     } else if (!user.onboardingComplete) {
-      // User exists but not onboarded → ensure they're on an onboarding screen
       if (!inAuthGroup) {
         router.replace('/(auth)/create-identity');
       } else if (segments[1] === 'landing' || segments[1] === 'sign-in') {
-        // Stuck on landing/sign-in after OAuth — push forward
         router.replace('/(auth)/create-identity');
       }
     } else if (user.onboardingComplete) {
-      // Onboarded → go to home (redirect away from auth screens)
       if (inAuthGroup) {
         router.replace('/home');
       }
@@ -127,19 +157,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const handleSignOut = useCallback(async () => {
     try {
-      await clerkSignOut();
+      await supabase.auth.signOut();
     } catch {}
     await AsyncStorage.removeItem(GUEST_STORAGE_KEY);
     setUser(null);
-  }, [clerkSignOut]);
+    setSupabaseUser(null);
+    setSession(null);
+  }, []);
 
   const updateUser = useCallback((updates: Partial<User>) => {
     setUser((prev) => {
       const updated = prev
         ? { ...prev, ...updates }
-        : { id: updates.id || 'guest', onboardingComplete: false, isGuest: true, ...updates } as User;
+        : ({
+            id: updates.id || 'guest',
+            onboardingComplete: false,
+            isGuest: true,
+            ...updates,
+          } as User);
 
-      // Persist guest users to AsyncStorage
       if (updated.isGuest) {
         AsyncStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(updated)).catch(() => {});
       }
@@ -148,16 +184,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const handleGetToken = useCallback(
-    async (options?: { template?: string }) => {
-      try {
-        return await getToken(options);
-      } catch {
-        return null;
-      }
-    },
-    [getToken]
-  );
+  const getToken = useCallback(async () => {
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      return session?.access_token ?? null;
+    } catch {
+      return null;
+    }
+  }, []);
 
   return (
     <AuthContext.Provider
@@ -166,8 +202,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isLoading,
         signOut: handleSignOut,
         updateUser,
-        getToken: handleGetToken,
-        clerkUser,
+        getToken,
+        supabaseUser,
       }}
     >
       {children}
@@ -184,7 +220,7 @@ export function useAuth() {
       signOut: async () => {},
       updateUser: () => {},
       getToken: async () => null,
-      clerkUser: null,
+      supabaseUser: null,
     } as AuthContextType;
   }
   return context;

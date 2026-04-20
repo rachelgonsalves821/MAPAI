@@ -1,13 +1,3 @@
-/**
- * Extend Clerk's publicMetadata type to include Mapai-specific fields.
- */
-interface ClerkPublicMetadata {
-  onboardingCompleted?: boolean;
-  onboardingCompletedAt?: string;
-}
-
-declare global {
-  interface UserPublicMetadata extends ClerkPublicMetadata {}
-}
-
+// This file is intentionally empty — Clerk has been removed.
+// Onboarding metadata is now managed in user_profiles.is_onboarded (Supabase).
 export {};

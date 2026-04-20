@@ -21,12 +21,8 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
-// Clerk — wrapped for web dev compatibility (mirrors sign-in.tsx pattern)
-let clerkUseSignIn: any = null;
-try {
-  const clerk = require('@clerk/clerk-expo');
-  clerkUseSignIn = clerk.useSignIn;
-} catch {}
+// MFA is handled by Supabase Auth. This screen is a placeholder for
+// future TOTP support — not currently reachable from the sign-in flow.
 
 const CODE_LENGTH = 6;
 
@@ -39,10 +35,7 @@ export default function MfaChallengeScreen() {
   const [verifying, setVerifying] = useState(false);
   const inputRefs = useRef<(TextInput | null)[]>([]);
 
-  // Clerk hooks — called unconditionally (React rules of hooks)
-  const signInHook = clerkUseSignIn
-    ? clerkUseSignIn()
-    : { signIn: null, setActive: null, isLoaded: false };
+  const signInHook = { signIn: null, setActive: null, isLoaded: false };
 
   const handleDigitChange = useCallback((text: string, index: number) => {
     // Accept only the last character typed (handles paste as single char)

@@ -99,20 +99,7 @@ export class UserService {
         // Friendships where user is addressee
         await (supabase.from('friendships') as any).delete().eq('addressee_id', userId).catch(() => {});
 
-        // 2. Delete Clerk auth user (if Clerk SDK available)
-        try {
-            const clerkSecretKey = process.env.CLERK_SECRET_KEY;
-            if (clerkSecretKey) {
-                const { createClerkClient } = await import('@clerk/clerk-sdk-node');
-                const clerk = createClerkClient({ secretKey: clerkSecretKey });
-                await clerk.users.deleteUser(userId);
-            }
-        } catch (err: any) {
-            console.warn(`[User] Clerk user deletion failed: ${err.message}`);
-            // Non-fatal — data is already gone
-        }
-
-        // Legacy: try Supabase Auth deletion too (backward compat)
+        // Delete Supabase Auth user
         try {
             const { error: authError } = await supabase.auth.admin.deleteUser(userId);
             if (authError) {

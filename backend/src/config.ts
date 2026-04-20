@@ -124,11 +124,8 @@ export function validateConfig(): ConfigValidationResult {
 
     // Critical secrets — fatal in any non-dev environment
     if (!isDev) {
-        if (!process.env.CLERK_SECRET_KEY) {
-            criticalErrors.push('CRITICAL: CLERK_SECRET_KEY not set — cannot verify JWTs in production');
-        }
         if (!config.supabase.jwtSecret) {
-            warnings.push('SUPABASE_JWT_SECRET not set — Supabase JWT auth fallback disabled (Clerk is primary)');
+            criticalErrors.push('CRITICAL: SUPABASE_JWT_SECRET not set — cannot verify JWTs in production');
         }
         if (!config.anthropic.apiKey && config.llmProvider === 'anthropic') {
             criticalErrors.push('CRITICAL: ANTHROPIC_API_KEY not set but LLM_PROVIDER=anthropic');

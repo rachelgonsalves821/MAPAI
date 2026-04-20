@@ -1,0 +1,149 @@
+
+MAPAI
+Brand & Design Guide
+For UI Designers & Product Teams
+Version 1.0  ·  Confidential
+
+01  Brand Overview
+What is Mapai?
+Mapai is an AI-native discovery platform that replaces the generic map experience with a personal co-pilot. It learns who you are, predicts what you want, and gets you there — all from one conversational interface. Think less Google Maps, more knowledgeable local friend.
+
+Brand Mission
+
+Brand Personality
+
+
+Target Audience
+Gen Z and Millennial urban dwellers (18–35), primarily in Boston. They are digital-first, socially aware, value authenticity over polish, and are deeply skeptical of algorithmic feed fatigue. They want tools that feel smart — not creepy.
+02  Logo & Wordmark
+Naming Convention
+The brand name is always written as: mapai (all lowercase in UI copy) or MAPAI in display/wordmark contexts. Never Map AI (two words) or MapAI (camel case).
+
+Logomark Concept
+
+Logo Variations
+
+Clear Space
+Maintain a minimum clear space of 1× the cap-height of the wordmark on all four sides. Never place the logo on a busy photographic background without a translucent scrim layer (black at 30–40% opacity minimum).
+Logo Don'ts
+03  Colour System
+Primary Palette
+The primary palette is built around a signature electric blue. It communicates energy, trust, and digital intelligence — while feeling fresh and distinct from generic app blues.
+
+
+Accent Palette
+Accents add personality and semantic meaning without competing with the primary blue.
+
+
+Neutral & Surface Palette
+
+
+Semantic Colours
+
+Map Pin Colour Logic
+04  Typography
+Primary Typefaces: Clash Display + Cabinet Grotesk
+Mapai uses a two-typeface system: Clash Display for all headings, display text, and brand moments; Cabinet Grotesk for all body copy, UI labels, captions, and data. Together they create a premium app feeling — bold and geometric at the top, clean and readable everywhere else. Think Notion meets fintech. On iOS, San Francisco is the system fallback; on Android, Roboto.
+
+
+Type Scale
+
+Type Usage Rules
+
+Voice & Tone in Copy
+05  Spacing & Layout
+Grid System
+Mapai uses a 4px base unit grid. All spacing, padding, margin, and sizing values must be multiples of 4px. Target device: 390px wide (iPhone 14 / 15 base model) as canonical design size.
+
+
+Safe Zones & Margins
+Horizontal screen margin: 16px (mobile). Content max-width for list views: 100% of viewport minus margins. Bottom safe area: always account for home indicator (34px on iPhone X+). Status bar: 44–54px top. Bottom navigation height: 56px + safe area inset.
+
+Corner Radius System
+06  Core Components
+Bottom Navigation Bar
+5 tabs: Map, Discover (Chat), Search, Social, Profile. Active tab: Electric Blue icon + filled dot indicator. Inactive: Stone grey icon. Height: 56px + safe area inset. Background: white with 12px blur backdrop. No border line — use soft box shadow (0px -1px 0px rgba(0,0,0,0.06)).
+
+Chat Input Bar (Persistent)
+Floating pill at bottom of map screen. Background: white. Border: 1px Cloud (#D1D5DB). Shadow: 0 4px 16px rgba(0,0,0,0.10). Inner padding: 12px 16px. Left: microphone icon (Stone). Right: send button (Electric Blue filled circle, 36px). Placeholder text: 'Where to?' — Body Default, Stone. On focus: border becomes Electric Blue 2px.
+
+Primary Button
+Background: #0558E8. Text: white, Cabinet Grotesk SemiBold 16px. Height: 52px. Corner radius: 12px. Pressed: #0440B8 background. Disabled: #D1D5DB background, Stone text. Min tap target: 44×44px. Icon: 20px, 8px gap from text. Never use ALL CAPS for button labels.
+
+Secondary Button
+Background: white or transparent. Border: 1.5px #0558E8. Text: #0558E8, Cabinet Grotesk SemiBold 16px. Height: 52px. Corner radius: 12px. Pressed: #E0ECFF background fill.
+
+Place Card (Map Pin Card)
+Triggered on tap of a map pin. Bottom sheet mini-card, 16px horizontal margin. White background, 12px corner radius, 16px shadow. Structure: [photo thumbnail 56×56px, 8px radius] + [name H3 + category tag + match score badge] + [two CTAs: 'Details' secondary | 'Navigate' primary]. Swipe down to dismiss.
+
+Match Score Badge
+Round badge displaying score 0–100. Size: 36×36px. Background: Electric Blue. Text: Clash Display Bold 14px white tabular. For high match (70+): solid blue. Medium (40–69): lighter blue (#1E7FFF). Low (<40): Stone grey. Always pair score with a one-line reasoning string.
+
+Filter Chip
+Pill shape (999px radius). Height: 32px. Padding: 8px 14px. Inactive: white background, 1px Cloud border, Ink text, Stone icon. Active: Electric Blue background, white text, white icon. Font: Cabinet Grotesk Medium 13px. Never truncate chip text — reduce font size to 11px minimum before truncating.
+
+Chat Bubble — AI Response
+Left aligned. Background: #F0F6FF (Mist). Left border: 3px solid #7C3AED (AI Violet). Corner radius: 0px top-left, 12px all other corners. Padding: 12px 14px. Text: Body Default, Ink. AI icon: 20px violet glyph top-left, 8px above bubble.
+
+Chat Bubble — User Message
+Right aligned. Background: #0558E8 (Electric Blue). Corner radius: 12px top-left, 0px bottom-right, 12px all others. Padding: 12px 14px. Text: Body Default, white.
+
+Bottom Sheet / Drawer
+Full-width. Top corners: 24px radius. Background: white. Drag handle: 36×4px, Stone, centred, 8px from top. Default collapsed height: 25% viewport. Expanded: 90% viewport. Transition: spring (damping 0.7, stiffness 300). Always has a scrim overlay (black 30% opacity) on the map beneath when expanded.
+
+Toast / Snackbar
+Appears at bottom above nav bar. Background: #111827 (Ink). Text: white, Body Small, Cabinet Grotesk Regular. Icon: 16px coloured (success/error/info). Auto-dismiss: 3s. Corner radius: 12px. Max width: screen width minus 32px margins. One action button max (e.g., 'Undo') in Electric Blue.
+
+Loading States
+Skeleton screens: use #E5EEFF shimmer rectangles matching the exact shape of the content loading. Never use spinners in place of content. For AI typing: animated three-dot pulse in AI Violet. For map pins loading: fade-in stagger with 40ms delay per pin.
+07  Iconography
+Icon set: Lucide Icons. Grid: 24×24px. Stroke weight: 1.5px. Line cap: round. Line join: round. Never filled icons (exception: tab bar active states use filled glyph). Minimum touch target for any tappable icon: 44×44px (add invisible padding).
+
+Icon Colour Rules
+
+Custom Icon Requirements
+The following icons are custom to Mapai and must be designed from scratch matching the Lucide stroke style: Map Pin (personalised, with score ring), Loyalty Pin (pin with gold ring), Friend Pin (pin with avatar cutout), AI Copilot (abstract neural/orbit glyph), Match Score Ring (donut progress ring).
+08  Motion & Animation
+Motion is a core part of the Mapai experience. Every animation should feel like it has physical weight and intent — not decorative. Use motion to confirm actions, guide attention, and reinforce the app's intelligence.
+
+
+Animation Principles
+09  Photography & Media
+Place Photography
+All place photos sourced from Google Places API or Instagram Graph API. Apply a subtle 5% opacity Electric Blue colour wash on hover/focus state of photo thumbnails to reinforce brand. Photos must always be cropped to 16:9 for hero cards, 1:1 for thumbnail pins, and 4:3 for carousel cards.
+
+Photo Overlay
+When overlaying text on photos (e.g., place name on hero image), apply a linear gradient scrim from transparent (top) to rgba(0,0,0,0.65) (bottom). Never use a flat solid overlay. Minimum text contrast on scrim: 4.5:1.
+
+Illustration Style
+Onboarding, empty states, and error screens may use custom illustration. Style: clean vector, thin strokes, Electric Blue primary palette with Mint and Violet accents. Characters (if any): diverse, Gen-Z coded, minimal facial detail. No skeuomorphic or realistic illustration styles.
+
+Social Signal Quotes
+When surfacing Reddit / Instagram / Google Review quotes on place detail cards: display as a pull-quote block with a #F0F6FF background, left border in the source brand colour (Reddit: orange, Google: blue, Instagram: gradient via icon), and source icon at 16px. Truncate at 120 characters with 'Read more' expansion.
+10  Screen Design Specifications
+Home / Map Screen
+Background: map canvas (MapKit iOS / Google Maps Android, minimalist style — muted greens and greys, Electric Blue roads). Overlays: bottom chat pill (always visible), top-left neighbourhood chip, top-right avatar. Filter chips scroll horizontally below the top bar. Bottom sheet collapsed by default. Map pins animate in with 40ms stagger on load.
+
+Chat / Discovery Screen
+Map fades to 30% opacity on chat expand — geographic context preserved. Chat thread scrolls upward. AI bubbles left with Violet left border, user bubbles right in Electric Blue. Place result cards scroll horizontally inside the chat thread — not below it. Voice input shows animated waveform in Electric Blue during active listening.
+
+Place Detail Screen
+Full-screen modal with 24px top corner radius and drag handle. Photo carousel at top (16:9, full bleed). Sticky header on scroll: place name + 2 CTA buttons. Match score ring: 64px donut ring in Electric Blue, score number inside, reasoning text below in Body Small Stone. Social signals section with source-branded quote cards. Tab row: Overview / Reviews / Map.
+
+Transport Comparison Screen
+Map preview at top 40% of screen showing route polyline (colour-coded by selected mode). Cards below in a single scroll column. Each card: mode icon (24px), transport name, ETA in H2, cost in H2, secondary detail in Caption. Best Value badge: Electric Blue filled pill. Fastest badge: Cyan filled pill. Selected card: Electric Blue 2px border.
+
+Arrival Survey Screen
+Bottom sheet, white, 24px radius. Header: place name + 'How was it?' in H2. Questions: emoji scale (5 emoji, evenly spaced, 48px tap targets), binary chips, or single-choice chips. Progress dots at top centre — Electric Blue active, Cloud inactive. Skip button: top-right, Stone text. Completion: animated checkmark in Mint + 'Thanks! We'll remember this' in Body Default.
+
+Social / Friends Screen
+Three sub-tabs: Feed, Friends, Plans. Feed cards: friend avatar (40px circle), place photo (56px square), friend name in Body Bold, one-line quote in Body Default Stone, timestamp in Caption. Emoji reaction row: 6 emojis, 36px touch targets. Friend list entries: avatar + name + mutual places count chip. Active location sharing shows green pulse dot on avatar.
+11  Accessibility Standards
+Mapai targets WCAG 2.1 AA compliance at minimum. Every design decision must be made with accessibility in mind from the start.
+
+12  Designer Deliverables Checklist
+Use this checklist to ensure all required design assets are prepared for handoff to engineering.
+
+
+
+Questions: product@mapai.app  ·  Version 1.0  ·  Confidential

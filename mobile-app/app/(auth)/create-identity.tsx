@@ -1,7 +1,6 @@
 /**
  * Mapai — Create Identity Screen
- * Mockup 3 — display name + username setup with live validation.
- * Clerk auth migration: uses useUser from @clerk/clerk-expo.
+ * Display name + username setup with live validation.
  */
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
@@ -25,15 +24,6 @@ import { useAuth } from '@/context/AuthContext';
 import apiClient from '@/services/api/client';
 import { supabase } from '@/services/supabase';
 
-// Clerk import — wrapped safely
-let useUser: (() => { user: any }) | null = null;
-try {
-  const clerk = require('@clerk/clerk-expo');
-  useUser = clerk.useUser;
-} catch {
-  useUser = () => ({ user: null });
-}
-
 type UsernameStatus = 'idle' | 'checking' | 'available' | 'taken' | 'invalid';
 
 const USERNAME_REGEX = /^[a-z0-9_]{3,20}$/;
@@ -41,13 +31,12 @@ const USERNAME_REGEX = /^[a-z0-9_]{3,20}$/;
 export default function CreateIdentityScreen() {
   const router = useRouter();
   const { setDisplayName, setUsername } = useOnboardingStore();
-
-  const clerkUser = useUser ? useUser().user : null;
+  const { supabaseUser } = useAuth();
 
   const [localName, setLocalName] = useState<string>(
-    clerkUser
-      ? [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(' ')
-      : ''
+    supabaseUser?.user_metadata?.full_name ||
+    supabaseUser?.user_metadata?.name ||
+    ''
   );
   const [localUsername, setLocalUsername] = useState('');
   const [usernameStatus, setUsernameStatus] = useState<UsernameStatus>('idle');
@@ -117,20 +106,6 @@ export default function CreateIdentityScreen() {
     const trimmedName = localName.trim();
     setDisplayName(trimmedName);
     setUsername(localUsername);
-
-    // Update Clerk user profile
-    if (clerkUser) {
-      try {
-        const [firstName, ...rest] = trimmedName.split(' ');
-        await clerkUser.update({
-          username: localUsername,
-          firstName: firstName ?? '',
-          lastName: rest.join(' ') ?? '',
-        });
-      } catch (e) {
-        console.warn('Clerk user update failed (non-blocking):', e);
-      }
-    }
 
     // Create user profile via backend API (handles Supabase insert with proper auth)
     try {

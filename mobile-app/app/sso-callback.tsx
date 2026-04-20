@@ -1,83 +1,60 @@
 /**
  * Mapai — SSO Callback (Web only)
- * Clerk redirects here after Google OAuth on web.
- * Handles the token exchange and session activation.
+ * Supabase redirects here after Google/Apple OAuth on web.
+ * detectSessionInUrl: true (set in supabase client) auto-parses the
+ * #access_token fragment — we just wait for the SIGNED_IN event.
  */
 
 import React, { useEffect, useRef } from 'react';
 import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
+import { supabase } from '@/services/supabase';
 
-// CRITICAL: Close the in-app browser on redirect (matches sign-in.tsx)
+// CRITICAL: Close the in-app browser on redirect
 WebBrowser.maybeCompleteAuthSession();
-
-let useSignUp: any = null;
-let useSignIn: any = null;
-try {
-  const clerk = require('@clerk/clerk-expo');
-  useSignUp = clerk.useSignUp;
-  useSignIn = clerk.useSignIn;
-} catch {}
-
-const MAX_RETRIES = 10;
-const RETRY_INTERVAL = 500; // ms
 
 export default function SSOCallbackScreen() {
   const router = useRouter();
   const handled = useRef(false);
 
-  const signUpHook = useSignUp ? useSignUp() : { signUp: null, setActive: null, isLoaded: false };
-  const signInHook = useSignIn ? useSignIn() : { signIn: null, setActive: null, isLoaded: false };
-
   useEffect(() => {
-    if (!signInHook.isLoaded && !signUpHook.isLoaded) return;
-    if (handled.current) return;
-
-    let retries = 0;
-
-    async function tryActivateSession(): Promise<boolean> {
-      // Check signUp completion (new user)
-      if (signUpHook.signUp?.status === 'complete' && signUpHook.signUp.createdSessionId) {
-        await signUpHook.setActive({ session: signUpHook.signUp.createdSessionId });
-        return true;
-      }
-
-      // Check signIn completion (existing user)
-      if (signInHook.signIn?.status === 'complete' && signInHook.signIn.createdSessionId) {
-        await signInHook.setActive({ session: signInHook.signIn.createdSessionId });
-        return true;
-      }
-
-      return false;
-    }
-
-    async function poll() {
-      try {
-        const activated = await tryActivateSession();
-        if (activated) {
-          handled.current = true;
-          router.replace('/(auth)/create-identity');
-          return;
-        }
-
-        retries++;
-        if (retries < MAX_RETRIES) {
-          setTimeout(poll, RETRY_INTERVAL);
-        } else {
-          // Timeout — fall back to create-identity and let route guard sort it out
-          handled.current = true;
-          router.replace('/(auth)/create-identity');
-        }
-      } catch (err) {
-        console.error('[SSO Callback] Error:', err);
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (handled.current) return;
+      if (event === 'SIGNED_IN' && session) {
+        handled.current = true;
+        router.replace('/(auth)/create-identity');
+      } else if (event === 'SIGNED_OUT') {
         handled.current = true;
         router.replace('/(auth)/sign-in');
       }
-    }
+    });
 
-    poll();
-  }, [signInHook.isLoaded, signUpHook.isLoaded, signInHook.signIn?.status, signUpHook.signUp?.status]);
+    // Fallback: if Supabase already has a session when this page mounts
+    // (e.g. fast redirect), navigate immediately.
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (handled.current) return;
+      if (session) {
+        handled.current = true;
+        router.replace('/(auth)/create-identity');
+      }
+    });
+
+    // Timeout fallback — if no event fires, push forward and let route guard decide
+    const timer = setTimeout(() => {
+      if (!handled.current) {
+        handled.current = true;
+        router.replace('/(auth)/create-identity');
+      }
+    }, 5000);
+
+    return () => {
+      subscription.unsubscribe();
+      clearTimeout(timer);
+    };
+  }, []);
 
   return (
     <View style={styles.container}>

@@ -22,7 +22,6 @@ import { reviewRoutes } from './routes/reviews.js';
 import { friendRoutes } from './routes/friends.js';
 import { usersSearchRoutes } from './routes/users-search.js';
 import { chatHistoryRoutes } from './routes/chat-history.js';
-import { clerkWebhookRoutes } from './routes/webhooks-clerk.js';
 import { surveyRoutes } from './routes/survey.js';
 
 async function main() {
@@ -95,7 +94,6 @@ async function main() {
     await app.register(friendRoutes, { prefix: '/v1/friends' });
     await app.register(usersSearchRoutes, { prefix: '/v1/users' });
     await app.register(chatHistoryRoutes, { prefix: '/v1/chat/history' });
-    await app.register(clerkWebhookRoutes, { prefix: '/v1/webhooks' });
     await app.register(surveyRoutes, { prefix: '/v1/surveys' });
 
     // Global error handler
