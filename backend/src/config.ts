@@ -50,7 +50,6 @@ export const config = {
         url: process.env.SUPABASE_URL || '',
         serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
         anonKey: process.env.SUPABASE_ANON_KEY || '',
-        jwtSecret: process.env.SUPABASE_JWT_SECRET || '',
     },
 
     // LLM Provider: 'gemini' or 'anthropic'
@@ -124,8 +123,8 @@ export function validateConfig(): ConfigValidationResult {
 
     // Critical secrets — fatal in any non-dev environment
     if (!isDev) {
-        if (!config.supabase.jwtSecret) {
-            criticalErrors.push('CRITICAL: SUPABASE_JWT_SECRET not set — cannot verify JWTs in production');
+        if (!config.supabase.url) {
+            criticalErrors.push('CRITICAL: SUPABASE_URL not set — cannot fetch JWKS to verify JWTs in production');
         }
         if (!config.anthropic.apiKey && config.llmProvider === 'anthropic') {
             criticalErrors.push('CRITICAL: ANTHROPIC_API_KEY not set but LLM_PROVIDER=anthropic');
