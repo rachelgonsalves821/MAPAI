@@ -36,10 +36,44 @@ axiosRetry(apiClient, {
 });
 
 // ---------------------------------------------------------------------------
-// Auth token — legacy cache kept for backwards compatibility with ApiTokenSync
-// in _layout.tsx. The interceptor now calls supabase.auth.getSession() directly
-// as the primary source, so these exports are effectively no-ops but remain to
-// avoid breaking existing imports.
+// Supabase session token cache.
+//
+// Calling supabase.auth.getSession() per-request was producing
+//   AbortError: Lock broken by another request with the 'steal' option
+// because supabase-js uses a browser LockManager lock and multiple concurrent
+// callers (interceptor, AuthContext, onboarding screens) were contending for it.
+//
+// Instead, we call getSession() exactly once at module load and then keep the
+// cache warm via onAuthStateChange. The interceptor does a synchronous read of
+// _supabaseToken — no lock, no concurrency.
+// ---------------------------------------------------------------------------
+let _supabaseToken: string | null = null;
+let _authInitPromise: Promise<void> | null = null;
+
+function initAuthCache(): Promise<void> {
+  if (_authInitPromise) return _authInitPromise;
+  _authInitPromise = (async () => {
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      _supabaseToken = session?.access_token ?? null;
+    } catch (e) {
+      console.warn('[API] initial getSession() failed:', (e as Error).message);
+    }
+    supabase.auth.onAuthStateChange((_event, session) => {
+      _supabaseToken = session?.access_token ?? null;
+    });
+  })();
+  return _authInitPromise;
+}
+
+// Kick off initialization eagerly so the cache is warm by the time requests fire.
+initAuthCache();
+
+// ---------------------------------------------------------------------------
+// Legacy token setters — kept so ApiTokenSync in _layout.tsx and any
+// dev/guest-mode callers can still push a token into the same cache.
 // ---------------------------------------------------------------------------
 let _authToken: string | null = null;
 export function setApiAuthToken(token: string | null) {
@@ -54,27 +88,21 @@ export function setApiTokenGetter(fn: (() => Promise<string | null>) | null) {
 // ---------------------------------------------------------------------------
 // Request interceptor: inject auth token + per-endpoint overrides
 //
-// Token resolution order:
-//  1. supabase.auth.getSession() — primary. supabase-js keeps the session in
-//     memory and auto-refreshes before expiry, so this is cheap and always
-//     returns the freshest token.
-//  2. _authToken cache — fallback if supabase returned null (e.g. guest mode
-//     where ApiTokenSync has pushed a custom token).
-//  3. AsyncStorage 'auth_token' — legacy fallback for dev tokens.
+// Token resolution order (all non-blocking after first request):
+//  1. _supabaseToken — cache populated by initAuthCache() + onAuthStateChange.
+//  2. _authToken — legacy cache used by ApiTokenSync / guest mode.
+//  3. _getToken() — live getter (last-resort; only set by ApiTokenSync).
+//  4. AsyncStorage 'auth_token' — legacy dev token fallback.
 // ---------------------------------------------------------------------------
 apiClient.interceptors.request.use(
   async (config: InternalAxiosRequestConfig) => {
     try {
-      let token: string | null = null;
+      // Block on the very first request so the cache has a chance to warm up.
+      // Subsequent calls resolve synchronously because _authInitPromise is
+      // already fulfilled.
+      await initAuthCache();
 
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        token = session?.access_token ?? null;
-      } catch (e) {
-        console.warn('[API] supabase.auth.getSession() threw:', e);
-      }
-
-      if (!token && _authToken) token = _authToken;
+      let token = _supabaseToken ?? _authToken;
       if (!token && _getToken) token = await _getToken().catch(() => null);
       if (!token) token = await AsyncStorage.getItem('auth_token');
 
