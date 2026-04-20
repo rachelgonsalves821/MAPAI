@@ -64,7 +64,7 @@ export const config = {
     // Google Gemini
     gemini: {
         apiKey: process.env.GOOGLE_GEMINI_API_KEY || '',
-        model: optionalEnv('GEMINI_MODEL', 'gemini-2.0-flash'),
+        model: optionalEnv('GEMINI_MODEL', 'gemini-2.5-flash'),
     },
 
     // Google Places
