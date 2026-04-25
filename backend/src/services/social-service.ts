@@ -86,7 +86,7 @@ export class SocialService {
         }
 
         const supabase = getSupabase()!;
-        const { data } = await (supabase.from('user_loved_places') as any)
+        const { data, error } = await (supabase.from('user_loved_places') as any)
             .upsert({
                 clerk_user_id: userId,
                 place_id: placeId,
@@ -99,14 +99,25 @@ export class SocialService {
             .select()
             .single();
 
-        // Increment visit count
-        if (data) {
-            await (supabase.from('user_loved_places') as any)
-                .update({ visit_count: (data.visit_count || 0) + 1 })
-                .eq('id', data.id);
+        if (error) {
+            console.error('[SocialService] lovePlace upsert failed:', error.message, error.code, error.details);
+            throw new Error(`Failed to save loved place: ${error.message}`);
         }
 
-        await this.createActivity(userId, 'place_loved', placeId, opts.placeName);
+        // Increment visit count (non-blocking — failure here is non-critical)
+        if (data) {
+            (supabase.from('user_loved_places') as any)
+                .update({ visit_count: (data.visit_count || 0) + 1 })
+                .eq('id', data.id)
+                .then(({ error: updateErr }: any) => {
+                    if (updateErr) console.warn('[SocialService] visit_count increment failed:', updateErr.message);
+                });
+        }
+
+        // Fire-and-forget activity event — never block the love action on this
+        this.createActivity(userId, 'place_loved', placeId, opts.placeName)
+            .catch((err: any) => console.warn('[SocialService] createActivity failed (non-critical):', err?.message));
+
         return data;
     }
 
@@ -116,8 +127,12 @@ export class SocialService {
             return;
         }
         const supabase = getSupabase()!;
-        await supabase.from('user_loved_places').delete()
+        const { error } = await supabase.from('user_loved_places').delete()
             .eq('clerk_user_id', userId).eq('place_id', placeId);
+        if (error) {
+            console.error('[SocialService] unlovePlace delete failed:', error.message, error.code);
+            throw new Error(`Failed to remove loved place: ${error.message}`);
+        }
     }
 
     async getLovedPlaces(userId: string, viewerId?: string): Promise<any[]> {

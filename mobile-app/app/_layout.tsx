@@ -19,6 +19,7 @@ import { CrashReporting } from '@/services/CrashReporting';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { setApiAuthToken, setApiTokenGetter } from '@/services/api/client';
 import { setUnauthorizedHandler } from '@/services/api/errorHandler';
+import ApiToast from '@/components/ApiToast';
 
 /**
  * Custom error boundary — shown when a route component crashes.
@@ -242,6 +243,7 @@ export default function RootLayout() {
         <MemoryCacheWatcher />
         <CrashReportingWatcher />
         <StatusBar style="dark" />
+        <ApiToast />
         <Stack screenOptions={{ headerShown: false }}>
           <Stack.Screen name="(auth)" options={{ animation: 'none' }} />
           <Stack.Screen name="sso-callback" options={{ animation: 'none' }} />

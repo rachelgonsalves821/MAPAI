@@ -3,7 +3,7 @@ import { placesApi } from './places';
 import { chatApi, ChatRequest } from './chat';
 import { navigationApi } from './navigation';
 import { memoryApi, UserMemoryResponse } from './memory';
-import { showApiError } from './errorHandler';
+import { showApiError, apiErrorEvents } from './errorHandler';
 import { LatLng, Place } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import apiClient from './client';
@@ -323,6 +323,14 @@ export function useLovePlaceToggle() {
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['social', 'loved-check', variables.place_id] });
       queryClient.invalidateQueries({ queryKey: ['social', 'loved-places'] });
+    },
+    onError: (error: any) => {
+      const msg = error?.response?.data?.error?.title
+        ?? error?.message
+        ?? 'Could not save loved place. Please try again.';
+      console.error('[useLovePlaceToggle] mutation failed:', msg);
+      // Emit a toast so the user sees the error
+      apiErrorEvents.emit('toast', { message: msg, type: 'error' });
     },
   });
 }

@@ -249,28 +249,41 @@ export async function socialRoutes(app: FastifyInstance) {
 
   app.post('/loved-places', {
     preHandler: authMiddleware,
-    handler: async (request) => {
+    handler: async (request, reply) => {
       const userId = request.user!.id;
       const { place_id, rating, one_line_review, personal_note, visibility, place_name, location } = request.body as any;
-      const result = await social.lovePlace(userId, place_id, {
-        rating,
-        oneLineReview: one_line_review,
-        personalNote: personal_note,
-        visibility,
-        placeName: place_name,
-        location,
-      });
-      return envelope(result);
+      if (!place_id) {
+        return reply.status(400).send(errorResponse(400, 'place_id is required', 'ValidationError'));
+      }
+      try {
+        const result = await social.lovePlace(userId, place_id, {
+          rating,
+          oneLineReview: one_line_review,
+          personalNote: personal_note,
+          visibility,
+          placeName: place_name,
+          location,
+        });
+        return envelope(result ?? { saved: true });
+      } catch (err: any) {
+        console.error('[Route] POST /loved-places failed:', err?.message);
+        return reply.status(500).send(errorResponse(500, err?.message ?? 'Failed to save loved place', 'ServerError'));
+      }
     },
   });
 
   app.delete('/loved-places/:placeId', {
     preHandler: authMiddleware,
-    handler: async (request) => {
+    handler: async (request, reply) => {
       const userId = request.user!.id;
       const { placeId } = request.params as any;
-      await social.unlovePlace(userId, placeId);
-      return envelope({ removed: true });
+      try {
+        await social.unlovePlace(userId, placeId);
+        return envelope({ removed: true });
+      } catch (err: any) {
+        console.error('[Route] DELETE /loved-places failed:', err?.message);
+        return reply.status(500).send(errorResponse(500, err?.message ?? 'Failed to remove loved place', 'ServerError'));
+      }
     },
   });
 
