@@ -61,6 +61,44 @@ export async function healthRoutes(app: FastifyInstance) {
     });
 
     /**
+     * GET /v1/health/test-love
+     * Runs the exact same upsert as lovePlace() and returns the raw Supabase
+     * error so we can diagnose failures without needing Vercel logs.
+     */
+    app.get('/health/test-love', async (_request, reply) => {
+        if (!hasDatabase()) {
+            return reply.status(503).send(envelope({ status: 'no_database' }));
+        }
+        const supabase = getSupabase()!;
+        const testUserId = 'health-check-test-user';
+        const testPlaceId = 'ChIJYSgDQQBx44kRA8ntPKRbfYE';
+        const { data, error } = await (supabase.from('user_loved_places') as any)
+            .upsert({
+                user_id: testUserId,
+                place_id: testPlaceId,
+                visibility: 'friends',
+                last_visited_at: new Date().toISOString(),
+            }, { onConflict: 'user_id,place_id' })
+            .select()
+            .single();
+        if (error) {
+            return reply.status(200).send(envelope({
+                status: 'upsert_failed',
+                error_message: error.message,
+                error_code: error.code,
+                error_details: error.details,
+                error_hint: error.hint,
+            }));
+        }
+        // Clean up the test row
+        await (supabase.from('user_loved_places') as any)
+            .delete()
+            .eq('user_id', testUserId)
+            .eq('place_id', testPlaceId);
+        return envelope({ status: 'ok', message: 'upsert succeeded — love feature DB layer is working' });
+    });
+
+    /**
      * GET /v1/admin/cleanup-chats
      * Deletes chat sessions older than 30 days. Protected with secret header.
      * Called by external scheduler (cron job) when pg_cron is unavailable.
