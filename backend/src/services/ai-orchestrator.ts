@@ -329,10 +329,14 @@ export class AiOrchestrator {
 
             // Belt-and-suspenders timeout: AbortController cancels the fetch; Promise.race
             // covers mid-stream body stalls that AbortController alone cannot cancel.
-            // Budget is per-attempt — each retry gets a fresh 20s.
+            // Budget is per-attempt — each retry gets a fresh 12 s.
+            //
+            // Why 12 s? With 2 retry attempts and a max backoff of 2 s the worst-case
+            // Gemini budget is 12 + 2 + 12 = 26 s, leaving room for DB I/O and the
+            // Places API call within Vercel's 60 s maxDuration window.
             const controller = new AbortController();
             const timeoutPromise = new Promise<never>((_, reject) =>
-                setTimeout(() => { controller.abort(); reject(new Error('Gemini call timed out after 20s')); }, 20_000)
+                setTimeout(() => { controller.abort(); reject(new Error('Gemini call timed out after 12s')); }, 12_000)
             );
 
             const result = await Promise.race([
@@ -344,8 +348,10 @@ export class AiOrchestrator {
     }
 
     private async callClaude(systemPrompt: string, messages: SessionMessage[]): Promise<string> {
+        // 20 s ceiling for Claude — fits within the 60 s Vercel maxDuration budget
+        // alongside DB overhead and the Places API call.
         const timeoutPromise = new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Claude call timed out after 25s')), 25_000)
+            setTimeout(() => reject(new Error('Claude call timed out after 20s')), 20_000)
         );
 
         const response = await Promise.race([

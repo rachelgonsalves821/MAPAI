@@ -55,8 +55,40 @@ async function main() {
     });
 
     // Plugins
+    //
+    // Dynamic CORS origin callback:
+    //  - Requests with no Origin header (native mobile, server-to-server, curl) are always allowed.
+    //  - Expo Go LAN/tunnel origins (exp://*) are always allowed.
+    //  - EAS Update / Expo dev-server origins (*.expo.dev, *.expo.io) are always allowed.
+    //  - Vercel preview deployments for the mapai project (mapai-*.vercel.app) are allowed.
+    //  - Everything else is checked against the explicit allowlist in config.corsOrigins.
+    //
+    // NOTE: A plain string array does NOT expand glob patterns such as 'https://*.expo.dev'.
+    // The callback is required to handle dynamic subdomains correctly.
     await app.register(cors, {
-        origin: config.corsOrigins,
+        origin: (origin, cb) => {
+            // No Origin header — native mobile apps, server-to-server calls, curl, etc.
+            if (!origin) { cb(null, true); return; }
+
+            // Expo Go deep-links and LAN dev servers (exp://192.168.x.x:8081, exp://u.expo.dev/...)
+            if (origin.startsWith('exp://')) { cb(null, true); return; }
+
+            // EAS Update channels and Expo hosted dev servers
+            if (origin.endsWith('.expo.dev') || origin.endsWith('.expo.io')) {
+                cb(null, true); return;
+            }
+
+            // Vercel preview deployments generated for the mapai project
+            // Pattern: https://mapai-<hash>-<team>.vercel.app
+            if (/^https:\/\/mapai[-a-z0-9]+\.vercel\.app$/.test(origin)) {
+                cb(null, true); return;
+            }
+
+            // Explicit production allowlist (mapai.app, www.mapai.app, mapai-api.fly.dev, localhost)
+            if (config.corsOrigins.includes(origin)) { cb(null, true); return; }
+
+            cb(new Error(`CORS: origin '${origin}' is not allowed`), false);
+        },
         methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     });
 

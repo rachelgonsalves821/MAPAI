@@ -11,6 +11,21 @@
  * The provider-level Gemini → Claude fallback already exists in
  * ai-orchestrator.processMessage; this helper sits underneath it so a single
  * 503 doesn't force us out of Gemini entirely.
+ *
+ * ── Timeout budget (Vercel-safe) ──────────────────────────────────────────
+ * Vercel Pro allows up to 60 s per function invocation (maxDuration: 60 in
+ * vercel.json). The callGemini wrapper in ai-orchestrator applies a 12 s
+ * AbortController timeout per attempt. With 2 attempts and a max backoff of
+ * 2 s, the worst-case budget is:
+ *
+ *   12 s (attempt 1) + 2 s (backoff) + 12 s (attempt 2) = 26 s
+ *
+ * This leaves ample headroom for DB I/O, memory loading, and the Places API
+ * call that follows the LLM response, keeping the total well under 60 s.
+ *
+ * On Vercel Hobby (10 s hard limit) the function will still time out for slow
+ * Gemini responses. The correct fix for Hobby is to move the backend to
+ * Fly.io (fly.toml is already configured in this repo).
  */
 
 import type { GoogleGenerativeAI } from '@google/generative-ai';
@@ -22,9 +37,9 @@ export type GeminiCall<T> = (
 ) => Promise<T>;
 
 export interface RetryOptions {
-    attempts?: number;       // default 3
+    attempts?: number;       // default 2  (reduced from 3 to fit 60 s Vercel budget)
     initialDelayMs?: number; // default 500
-    maxDelayMs?: number;     // default 4000
+    maxDelayMs?: number;     // default 2000 (reduced from 4000)
 }
 
 export async function withGeminiRetry<T>(
@@ -32,9 +47,9 @@ export async function withGeminiRetry<T>(
     call: GeminiCall<T>,
     options: RetryOptions = {}
 ): Promise<T> {
-    const attempts = options.attempts ?? 3;
+    const attempts = options.attempts ?? 2;
     const initial = options.initialDelayMs ?? 500;
-    const max = options.maxDelayMs ?? 4000;
+    const max = options.maxDelayMs ?? 2000;
 
     const runWithModel = async (modelName: string): Promise<T> => {
         let lastErr: unknown;
