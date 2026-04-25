@@ -80,9 +80,10 @@ export class SocialService {
         placeName?: string;
         location?: { latitude: number; longitude: number };
     } = {}): Promise<any> {
+        console.log(`[SocialService] lovePlace called — userId=${userId?.slice(0,8)}... placeId=${placeId} hasDB=${hasDatabase()}`);
         if (!hasDatabase()) {
-            console.warn('[SocialService] No database — returning null for lovePlace (configure Supabase to persist loved places)');
-            return null;
+            console.error('[SocialService] lovePlace: NO DATABASE — SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is missing on this server. Loved place will NOT be saved.');
+            throw new Error('Database not configured on server — cannot save loved place. Check SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables.');
         }
 
         const supabase = getSupabase()!;
