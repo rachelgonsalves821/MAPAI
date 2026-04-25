@@ -18,6 +18,7 @@ import { useOnboardingMigration } from '@/hooks/useOnboardingMigration';
 import { CrashReporting } from '@/services/CrashReporting';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { setApiAuthToken, setApiTokenGetter } from '@/services/api/client';
+import { setUnauthorizedHandler } from '@/services/api/errorHandler';
 
 /**
  * Custom error boundary — shown when a route component crashes.
@@ -115,7 +116,18 @@ function MigrationRunner() {
  *  2. setApiAuthToken — caches the resolved JWT so most requests skip the await.
  */
 function ApiTokenSync() {
-  const { user, getToken } = useAuth();
+  const { user, getToken, signOut } = useAuth();
+
+  // Wire up the 401 handler once so the Axios interceptor can trigger a
+  // sign-out when the backend rejects a token as invalid or expired.
+  // Without this, a 401 is silently swallowed and the user stays stuck.
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      console.warn('[Auth] 401 received — signing out and redirecting to sign-in');
+      signOut();
+    });
+    return () => setUnauthorizedHandler(() => {});
+  }, [signOut]);
 
   useEffect(() => {
     setApiTokenGetter(user?.id ? getToken : null);

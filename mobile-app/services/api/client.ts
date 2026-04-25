@@ -17,7 +17,7 @@ const apiClient: AxiosInstance = axios.create({
 // ---------------------------------------------------------------------------
 // Retry configuration
 // Retries 3 times by default with exponential backoff + jitter (100ms, 400ms,
-// 1600ms). POST /chat/ endpoints are capped at 1 retry (set per-request below)
+// 1600ms). POST /chat/ endpoints are capped at 0 retries (set per-request below)
 // because LLM calls are expensive and non-idempotent.
 // ---------------------------------------------------------------------------
 axiosRetry(apiClient, {
@@ -38,14 +38,19 @@ axiosRetry(apiClient, {
 // ---------------------------------------------------------------------------
 // Supabase session token cache.
 //
-// Calling supabase.auth.getSession() per-request was producing
-//   AbortError: Lock broken by another request with the 'steal' option
-// because supabase-js uses a browser LockManager lock and multiple concurrent
-// callers (interceptor, AuthContext, onboarding screens) were contending for it.
+// Problem: On web (Vercel), Supabase persists the session in localStorage.
+// When the page first loads, supabase.auth.getSession() is async and may not
+// resolve before the first API request fires. This causes the first request
+// to be sent without a token → 401.
 //
-// Instead, we call getSession() exactly once at module load and then keep the
-// cache warm via onAuthStateChange. The interceptor does a synchronous read of
-// _supabaseToken — no lock, no concurrency.
+// Solution:
+//  1. initAuthCache() is called eagerly at module load to warm the cache.
+//  2. The request interceptor awaits initAuthCache() so the first request
+//     always blocks until the initial session is resolved.
+//  3. If _supabaseToken is still null after initAuthCache() resolves (e.g.
+//     the onAuthStateChange event fired after getSession() returned null on
+//     web), we do a fresh getSession() call as a last resort before failing.
+//  4. onAuthStateChange keeps the cache warm for all subsequent requests.
 // ---------------------------------------------------------------------------
 let _supabaseToken: string | null = null;
 let _authInitPromise: Promise<void> | null = null;
@@ -88,11 +93,13 @@ export function setApiTokenGetter(fn: (() => Promise<string | null>) | null) {
 // ---------------------------------------------------------------------------
 // Request interceptor: inject auth token + per-endpoint overrides
 //
-// Token resolution order (all non-blocking after first request):
+// Token resolution order:
 //  1. _supabaseToken — cache populated by initAuthCache() + onAuthStateChange.
 //  2. _authToken — legacy cache used by ApiTokenSync / guest mode.
-//  3. _getToken() — live getter (last-resort; only set by ApiTokenSync).
-//  4. AsyncStorage 'auth_token' — legacy dev token fallback.
+//  3. _getToken() — live getter from AuthContext (set by ApiTokenSync).
+//  4. Fresh supabase.auth.getSession() — last-resort for web cold-start where
+//     onAuthStateChange fires after the first request is already in flight.
+//  5. AsyncStorage 'auth_token' — legacy dev token fallback.
 // ---------------------------------------------------------------------------
 apiClient.interceptors.request.use(
   async (config: InternalAxiosRequestConfig) => {
@@ -103,7 +110,27 @@ apiClient.interceptors.request.use(
       await initAuthCache();
 
       let token = _supabaseToken ?? _authToken;
+
+      // If the cached token is still null, try the live getter from AuthContext.
       if (!token && _getToken) token = await _getToken().catch(() => null);
+
+      // Last resort: do a fresh getSession() call. This handles the web
+      // cold-start race where the Supabase session is in localStorage but
+      // onAuthStateChange hasn't fired yet when the first request goes out.
+      if (!token) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          token = session?.access_token ?? null;
+          if (token) {
+            // Warm the cache so subsequent requests don't need this fallback.
+            _supabaseToken = token;
+          }
+        } catch {
+          // Ignore — fall through to AsyncStorage
+        }
+      }
+
+      // Final fallback: legacy AsyncStorage token (dev / guest mode).
       if (!token) token = await AsyncStorage.getItem('auth_token');
 
       if (token) {
@@ -121,7 +148,7 @@ apiClient.interceptors.request.use(
     }
 
     // LLM calls can take longer — extend the timeout to 30 seconds.
-    // The server enforces a 20s ceiling on the Gemini call itself, so this
+    // The server enforces a 12s ceiling on the Gemini call itself, so this
     // gives room for DB overhead + a provider fallback before the client cuts off.
     if (config.url?.includes('/chat/')) {
       config.timeout = 30000;
@@ -146,7 +173,7 @@ apiClient.interceptors.response.use(
     const status = error.response ? error.response.status : null;
 
     if (status === 401) {
-      console.warn('Unauthorized access - token may be invalid or expired');
+      console.warn('[API] 401 Unauthorized — token may be missing, expired, or SUPABASE_URL not set on backend');
       // Notify the auth layer so it can trigger a token refresh or sign-out
       onUnauthorized();
     } else if (status === 404) {

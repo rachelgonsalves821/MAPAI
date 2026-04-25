@@ -37,6 +37,25 @@ function parseCorsOrigins(): string[] {
     return raw.split(',').map((o) => o.trim()).filter(Boolean);
 }
 
+// ---------------------------------------------------------------------------
+// Startup diagnostics — logged once when the module is first imported.
+// These lines appear in Vercel Function Logs and make it immediately obvious
+// which environment variables are missing, without exposing secret values.
+// ---------------------------------------------------------------------------
+const _missingVars: string[] = [];
+if (!process.env.SUPABASE_URL)            _missingVars.push('SUPABASE_URL');
+if (!process.env.SUPABASE_SERVICE_ROLE_KEY) _missingVars.push('SUPABASE_SERVICE_ROLE_KEY');
+if (!process.env.GOOGLE_GEMINI_API_KEY)   _missingVars.push('GOOGLE_GEMINI_API_KEY');
+if (!process.env.GOOGLE_PLACES_API_KEY)   _missingVars.push('GOOGLE_PLACES_API_KEY');
+if (_missingVars.length > 0) {
+    console.error(
+        `[Config] ⚠️  Missing environment variables: ${_missingVars.join(', ')}\n` +
+        '         Add these to Vercel Project Settings → Environment Variables and redeploy.'
+    );
+} else {
+    console.info('[Config] All required environment variables are set.');
+}
+
 export const config = {
     // Server
     port: parseInt(optionalEnv('PORT', '3001'), 10),
