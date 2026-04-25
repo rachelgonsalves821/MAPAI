@@ -327,6 +327,160 @@ export class SocialService {
         return 'none';
     }
 
+    // ─── Place View Tracking ─────────────────────────────
+
+    /**
+     * Records that a user opened a place detail screen.
+     * Upserts into recent_places_viewed (incrementing view_count + refreshing
+     * last_viewed_at) and optionally emits a 'place_viewed' activity event.
+     * The activity event is throttled to once per hour per user+place pair
+     * to avoid flooding the feed.
+     */
+    async trackPlaceView(userId: string, placeId: string, opts: {
+        placeName?: string;
+        latitude?: number;
+        longitude?: number;
+        category?: string;
+        emitActivity?: boolean;
+    } = {}): Promise<void> {
+        if (!hasDatabase()) {
+            console.warn('[SocialService] No database — trackPlaceView is a no-op');
+            return;
+        }
+        const supabase = getSupabase()!;
+        const { emitActivity = false } = opts; // default false — views are private by default
+
+        // Upsert into recent_places_viewed
+        const now = new Date().toISOString();
+        const { data: existing } = await (supabase.from('recent_places_viewed') as any)
+            .select('id, view_count')
+            .eq('user_id', userId)
+            .eq('place_id', placeId)
+            .maybeSingle();
+
+        if (existing) {
+            await (supabase.from('recent_places_viewed') as any)
+                .update({
+                    last_viewed_at: now,
+                    view_count: (existing.view_count || 1) + 1,
+                    place_name: opts.placeName,
+                    latitude: opts.latitude,
+                    longitude: opts.longitude,
+                    category: opts.category,
+                })
+                .eq('id', existing.id);
+        } else {
+            await (supabase.from('recent_places_viewed') as any)
+                .insert({
+                    user_id: userId,
+                    place_id: placeId,
+                    place_name: opts.placeName,
+                    latitude: opts.latitude,
+                    longitude: opts.longitude,
+                    category: opts.category,
+                    view_count: 1,
+                    first_viewed_at: now,
+                    last_viewed_at: now,
+                });
+        }
+
+        // Optionally emit activity event (throttled — once per hour per user+place)
+        if (emitActivity) {
+            const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+            const { count } = await (supabase.from('activity_events') as any)
+                .select('id', { count: 'exact', head: true })
+                .eq('actor_id', userId)
+                .eq('place_id', placeId)
+                .eq('activity_type', 'place_viewed')
+                .gte('created_at', oneHourAgo);
+            if ((count ?? 0) === 0) {
+                await this.createActivity(userId, 'place_viewed', placeId, opts.placeName);
+            }
+        }
+    }
+
+    /**
+     * Returns the N most recently viewed places for a user.
+     * Powers the "Recently Viewed" section in the Social / Profile tab.
+     */
+    async getRecentPlacesViewed(userId: string, limit = 20): Promise<any[]> {
+        if (!hasDatabase()) {
+            console.warn('[SocialService] No database — returning empty array for getRecentPlacesViewed');
+            return [];
+        }
+        const supabase = getSupabase()!;
+        const { data } = await (supabase.from('recent_places_viewed') as any)
+            .select('*')
+            .eq('user_id', userId)
+            .order('last_viewed_at', { ascending: false })
+            .limit(limit);
+        return data || [];
+    }
+
+    /**
+     * Efficiently checks whether a user has loved a specific place.
+     * Much faster than fetching the entire loved list and filtering client-side.
+     */
+    async isPlaceLoved(userId: string, placeId: string): Promise<boolean> {
+        if (!hasDatabase()) return false;
+        const supabase = getSupabase()!;
+        const { count } = await (supabase.from('user_loved_places') as any)
+            .select('id', { count: 'exact', head: true })
+            .eq('user_id', userId)
+            .eq('place_id', placeId);
+        return (count ?? 0) > 0;
+    }
+
+    /**
+     * Enriched friend feed — joins actor profile (display_name, avatar_url)
+     * so the frontend doesn't need a second round-trip per card.
+     * Excludes 'place_viewed' events from the public feed (those are private).
+     */
+    async getEnrichedFriendFeed(userId: string, limit = 20, cursor?: string): Promise<any[]> {
+        if (!hasDatabase()) {
+            console.warn('[SocialService] No database — returning empty array for getEnrichedFriendFeed');
+            return [];
+        }
+        const supabase = getSupabase()!;
+        const friendIds = await this._getAcceptedFriendIds(userId);
+        if (!friendIds.length) return [];
+        const blockedIds = await this.getBlockedIds(userId);
+        const validFriendIds = friendIds.filter((id: string) => !blockedIds.includes(id));
+        if (!validFriendIds.length) return [];
+
+        let query = (supabase.from('activity_events') as any)
+            .select('id, actor_id, activity_type, place_id, place_name, metadata, created_at')
+            .in('actor_id', validFriendIds)
+            .in('activity_type', ['place_loved', 'place_visited', 'review_posted', 'place_shared'])
+            .order('created_at', { ascending: false })
+            .limit(limit);
+
+        if (cursor) {
+            query = query.lt('created_at', cursor);
+        }
+
+        const { data: events } = await query;
+        if (!events?.length) return [];
+
+        // Batch-fetch actor profiles to avoid N+1 queries
+        const uniqueActorIds = [...new Set(events.map((e: any) => e.actor_id))];
+        const { data: profiles } = await (supabase.from('user_profiles') as any)
+            .select('user_id, display_name, username, avatar_url')
+            .in('user_id', uniqueActorIds);
+
+        const profileMap = new Map((profiles || []).map((p: any) => [p.user_id, p]));
+
+        return events.map((row: any) => {
+            const profile = profileMap.get(row.actor_id);
+            return {
+                ...row,
+                actor_name: profile?.display_name ?? null,
+                actor_username: profile?.username ?? null,
+                actor_avatar_url: profile?.avatar_url ?? null,
+            };
+        });
+    }
+
     // ─── Internal helpers ────────────────────────────────
 
     /**

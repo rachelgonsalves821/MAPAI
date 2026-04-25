@@ -1,16 +1,20 @@
 /**
- * Mapai — Social Feed Screen
- * Phase 2: Friend activity feed with emoji reactions.
- * Route: /social
+ * Mapai — Social Screen
+ * PRD §8.3.9: Social Tab with three sub-tabs: Feed, Loved Places, Recently Viewed.
+ *
+ * Key changes from previous version:
+ *  - Sub-tab navigation (Feed / Loved Places / Recently Viewed)
+ *  - Feed now uses authenticated apiClient via useFriendFeed hook (fixes 401)
+ *  - Actor names/avatars come from the enriched backend response (no N+1 fetches)
+ *  - Loved Places sub-tab renders the user's full loved list inline
+ *  - Recently Viewed sub-tab renders the user's view history
  */
-
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
-  Animated,
+  FlatList,
   Platform,
   RefreshControl,
-  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -25,525 +29,389 @@ import {
   Spacing,
   Typography,
 } from '@/constants/theme';
-
-import { BACKEND_URL } from '@/constants/api';
+import { useAuth } from '@/context/AuthContext';
+import apiClient from '@/services/api/client';
+import {
+  FeedItem,
+  RecentPlace,
+  useFriendFeed,
+  useLovedPlaces,
+  useRecentPlacesViewed,
+} from '@/services/api/hooks';
 
 // ─── Constants ────────────────────────────────────────────────
-
 const TOP_INSET = Platform.OS === 'ios' ? 54 : 34;
 
-// Reaction emoji definitions — order matches PRD FR-8 reaction bar spec
 const REACTIONS = [
-  { key: 'heart',    emoji: '❤️' },
-  { key: 'fire',     emoji: '🔥' },
-  { key: 'clap',     emoji: '👏' },
-  { key: 'drool',    emoji: '🤤' },
-  { key: 'bookmark', emoji: '🔖' },
-  { key: 'question', emoji: '❓' },
+  { key: 'heart',    emoji: '\u2764\uFE0F' },
+  { key: 'fire',     emoji: '\uD83D\uDD25' },
+  { key: 'clap',     emoji: '\uD83D\uDC4F' },
+  { key: 'drool',    emoji: '\uD83E\uDD24' },
+  { key: 'bookmark', emoji: '\uD83D\uDD16' },
+  { key: 'question', emoji: '\u2753' },
 ] as const;
-
 type ReactionKey = (typeof REACTIONS)[number]['key'];
 
-// Avatar background palette — cycles by hash of actor_id
 const AVATAR_COLORS = [
-  '#0558E8',
-  '#7C3AED',
-  '#10B981',
-  '#F59E0B',
-  '#EF4444',
-  '#3B82F6',
-  '#8B5CF6',
+  '#0558E8', '#7C3AED', '#10B981',
+  '#F59E0B', '#EF4444', '#3B82F6', '#8B5CF6',
 ];
 
-// ─── Types ────────────────────────────────────────────────────
-
-interface FeedItem {
-  id: string;
-  actor_id: string;
-  actor_name?: string;
-  activity_type: string;
-  place_id: string;
-  place_name: string;
-  metadata?: {
-    one_line_review?: string;
-    rating?: number;
-  };
-  created_at: string;
-  // Optimistic local reaction state
-  myReaction?: ReactionKey | null;
-}
+type SubTab = 'feed' | 'loved' | 'recent';
 
 // ─── Helpers ──────────────────────────────────────────────────
-
-function avatarColor(actorId: string): string {
+function avatarColor(id: string): string {
   let hash = 0;
-  for (let i = 0; i < actorId.length; i++) {
-    hash = (hash * 31 + actorId.charCodeAt(i)) & 0xffff;
-  }
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) & 0xffff;
   return AVATAR_COLORS[hash % AVATAR_COLORS.length];
 }
 
-function actorInitial(actorId: string, actorName?: string): string {
-  if (actorName && actorName.length > 0) return actorName[0].toUpperCase();
-  return actorId[0]?.toUpperCase() ?? '?';
+function actorInitial(id: string, name?: string | null): string {
+  if (name && name.length > 0) return name[0].toUpperCase();
+  return id[0]?.toUpperCase() ?? '?';
 }
 
-function formatTimeAgo(isoDate: string): string {
-  const now = Date.now();
-  const then = new Date(isoDate).getTime();
-  const diffMs = now - then;
-  const diffMins = Math.floor(diffMs / 60_000);
-  const diffHours = Math.floor(diffMs / 3_600_000);
-  const diffDays = Math.floor(diffMs / 86_400_000);
-
-  if (diffMins < 1) return 'just now';
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays === 1) return 'Yesterday';
-
-  const d = new Date(isoDate);
-  const months = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-  ];
-  return `${months[d.getMonth()]} ${d.getDate()}`;
+function timeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60_000);
+  const h = Math.floor(diff / 3_600_000);
+  const d = Math.floor(diff / 86_400_000);
+  if (m < 1) return 'just now';
+  if (m < 60) return m + 'm ago';
+  if (h < 24) return h + 'h ago';
+  if (d < 7) return d + 'd ago';
+  return new Date(iso).toLocaleDateString();
 }
 
-function activityLabel(activityType: string): string {
-  switch (activityType) {
-    case 'loved_place':   return 'loved';
-    case 'visited_place': return 'visited';
-    case 'reviewed':      return 'reviewed';
-    case 'saved':         return 'saved';
-    default:              return 'liked';
+function activityLabel(type: string): string {
+  switch (type) {
+    case 'place_loved':   return ' loved ';
+    case 'place_visited': return ' visited ';
+    case 'review_posted': return ' reviewed ';
+    case 'place_shared':  return ' shared ';
+    default:              return ' checked out ';
   }
 }
 
-// ─── Sub-components ───────────────────────────────────────────
-
-function FriendAvatar({
-  actorId,
-  actorName,
-  size = 40,
-}: {
-  actorId: string;
-  actorName?: string;
-  size?: number;
-}) {
-  return (
-    <View
-      style={[
-        styles.avatar,
-        {
-          width: size,
-          height: size,
-          borderRadius: size / 2,
-          backgroundColor: avatarColor(actorId),
-        },
-      ]}
-    >
-      <Text style={[styles.avatarInitial, { fontSize: size * 0.38 }]}>
-        {actorInitial(actorId, actorName)}
-      </Text>
-    </View>
-  );
+function relativeDate(iso?: string): string {
+  if (!iso) return '';
+  const diff = Date.now() - new Date(iso).getTime();
+  const d = Math.floor(diff / 86_400_000);
+  if (d === 0) return 'Today';
+  if (d === 1) return 'Yesterday';
+  if (d < 7) return d + ' days ago';
+  const w = Math.floor(d / 7);
+  if (w < 5) return w + (w > 1 ? ' weeks ago' : ' week ago');
+  const mo = Math.floor(d / 30);
+  return mo + (mo > 1 ? ' months ago' : ' month ago');
 }
 
-function ReactionBar({
-  itemId,
-  activeReaction,
-  onReact,
-}: {
-  itemId: string;
-  activeReaction?: ReactionKey | null;
-  onReact: (itemId: string, reaction: ReactionKey) => void;
-}) {
+// ─── Feed Card ────────────────────────────────────────────────
+interface FeedCardProps {
+  item: FeedItem & { myReaction?: ReactionKey | null };
+  onReact: (id: string, reaction: ReactionKey) => void;
+  onPlacePress: (placeId: string, placeName?: string) => void;
+}
+
+function FeedCard({ item, onReact, onPlacePress }: FeedCardProps) {
+  const bg = avatarColor(item.actor_id);
+  const initial = actorInitial(item.actor_id, item.actor_name);
+  const displayName = item.actor_name ?? item.actor_username ?? 'A friend';
+
   return (
-    <View style={styles.reactionBar}>
-      {REACTIONS.map(({ key, emoji }) => {
-        const isActive = activeReaction === key;
-        return (
+    <TouchableOpacity
+      style={styles.card}
+      activeOpacity={0.85}
+      onPress={() => onPlacePress(item.place_id, item.place_name)}
+    >
+      <View style={styles.cardHeader}>
+        <View style={[styles.avatar, { width: 36, height: 36, borderRadius: 18, backgroundColor: bg }]}>
+          <Text style={[styles.avatarInitial, { fontSize: 14 }]}>{initial}</Text>
+        </View>
+        <View style={styles.cardMeta}>
+          <View style={styles.cardTitleRow}>
+            <Text style={styles.friendName}>{displayName}</Text>
+            <Text style={styles.actionText}>{activityLabel(item.activity_type)}</Text>
+          </View>
+          <Text style={styles.placeName} numberOfLines={1}>{item.place_name ?? item.place_id}</Text>
+        </View>
+        <Text style={styles.timeAgo}>{timeAgo(item.created_at)}</Text>
+      </View>
+
+      {!!item.metadata?.one_line_review && (
+        <View style={styles.reviewRow}>
+          <Ionicons name="chatbubble-outline" size={13} color={Colors.textTertiary} />
+          <Text style={styles.reviewText} numberOfLines={2}>
+            "{item.metadata.one_line_review}"
+          </Text>
+        </View>
+      )}
+
+      <View style={styles.reactionBar}>
+        {REACTIONS.map(({ key, emoji }) => (
           <TouchableOpacity
             key={key}
-            style={[
-              styles.reactionBtn,
-              isActive && styles.reactionBtnActive,
-            ]}
-            onPress={() => onReact(itemId, key)}
-            activeOpacity={0.75}
-            accessibilityRole="button"
-            accessibilityLabel={`React with ${key}`}
+            style={[styles.reactionBtn, item.myReaction === key && styles.reactionBtnActive]}
+            onPress={() => onReact(item.id, key)}
+            hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
           >
             <Text style={styles.reactionEmoji}>{emoji}</Text>
           </TouchableOpacity>
-        );
-      })}
-    </View>
-  );
-}
-
-function FeedCard({
-  item,
-  onReact,
-  onPlacePress,
-}: {
-  item: FeedItem;
-  onReact: (itemId: string, reaction: ReactionKey) => void;
-  onPlacePress: (placeId: string, placeName: string) => void;
-}) {
-  const displayName = item.actor_name ?? item.actor_id;
-
-  return (
-    <View style={styles.card}>
-      {/* Card header row */}
-      <View style={styles.cardHeader}>
-        <FriendAvatar actorId={item.actor_id} actorName={item.actor_name} />
-
-        <View style={styles.cardMeta}>
-          <View style={styles.cardTitleRow}>
-            <Text style={styles.friendName} numberOfLines={1}>
-              {displayName}
-            </Text>
-            <Text style={styles.actionText}>
-              {' '}{activityLabel(item.activity_type)}{' '}
-            </Text>
-          </View>
-          <TouchableOpacity
-            onPress={() => onPlacePress(item.place_id, item.place_name)}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.placeName} numberOfLines={1}>
-              {item.place_name}
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        <Text style={styles.timeAgo}>
-          {formatTimeAgo(item.created_at)}
-        </Text>
+        ))}
       </View>
-
-      {/* One-line review */}
-      {item.metadata?.one_line_review ? (
-        <View style={styles.reviewRow}>
-          <Ionicons
-            name="chatbubble-ellipses-outline"
-            size={13}
-            color={Colors.textTertiary}
-          />
-          <Text style={styles.reviewText} numberOfLines={2}>
-            {item.metadata.one_line_review}
-          </Text>
-        </View>
-      ) : null}
-
-      {/* Reaction bar */}
-      <ReactionBar
-        itemId={item.id}
-        activeReaction={item.myReaction}
-        onReact={onReact}
-      />
-    </View>
+    </TouchableOpacity>
   );
 }
 
-// ─── Main Screen ──────────────────────────────────────────────
+// ─── Loved Place Card ─────────────────────────────────────────
+interface LovedPlace {
+  id: string;
+  place_id: string;
+  place_name?: string;
+  rating?: number;
+  one_line_review?: string;
+  visit_count?: number;
+  last_visited_at?: string;
+  visibility?: string;
+}
 
-export default function SocialFeedScreen() {
+function LovedCard({ item, onPress }: { item: LovedPlace; onPress: () => void }) {
+  return (
+    <TouchableOpacity style={styles.card} activeOpacity={0.85} onPress={onPress}>
+      <View style={styles.cardHeader}>
+        <View style={[styles.avatar, { width: 36, height: 36, borderRadius: 10, backgroundColor: '#FEE2E2' }]}>
+          <Ionicons name="heart" size={18} color="#EF4444" />
+        </View>
+        <View style={styles.cardMeta}>
+          <Text style={styles.placeName} numberOfLines={1}>{item.place_name ?? item.place_id}</Text>
+          {item.last_visited_at && (
+            <Text style={styles.timeAgo}>Last visited {relativeDate(item.last_visited_at)}</Text>
+          )}
+        </View>
+        {item.visit_count != null && item.visit_count > 1 && (
+          <View style={styles.visitBadge}>
+            <Text style={styles.visitBadgeText}>{item.visit_count}x</Text>
+          </View>
+        )}
+      </View>
+      {!!item.one_line_review && (
+        <View style={styles.reviewRow}>
+          <Ionicons name="chatbubble-outline" size={13} color={Colors.textTertiary} />
+          <Text style={styles.reviewText} numberOfLines={2}>"{item.one_line_review}"</Text>
+        </View>
+      )}
+      {item.rating != null && (
+        <View style={{ flexDirection: 'row', gap: 2 }}>
+          {Array.from({ length: 5 }).map((_, i) => (
+            <Ionicons
+              key={i}
+              name={i < item.rating! ? 'star' : 'star-outline'}
+              size={13}
+              color="#F59E0B"
+            />
+          ))}
+        </View>
+      )}
+    </TouchableOpacity>
+  );
+}
+
+// ─── Recent Place Card ────────────────────────────────────────
+function RecentCard({ item, onPress }: { item: RecentPlace; onPress: () => void }) {
+  return (
+    <TouchableOpacity style={styles.card} activeOpacity={0.85} onPress={onPress}>
+      <View style={styles.cardHeader}>
+        <View style={[styles.avatar, { width: 36, height: 36, borderRadius: 10, backgroundColor: '#EFF6FF' }]}>
+          <Ionicons name="location-outline" size={18} color={Colors.brandBlue} />
+        </View>
+        <View style={styles.cardMeta}>
+          <Text style={styles.placeName} numberOfLines={1}>{item.place_name ?? item.place_id}</Text>
+          <Text style={styles.timeAgo}>Viewed {relativeDate(item.last_viewed_at)}</Text>
+        </View>
+        {item.view_count > 1 && (
+          <View style={styles.visitBadge}>
+            <Text style={styles.visitBadgeText}>{item.view_count}x</Text>
+          </View>
+        )}
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+// ─── Main Screen ─────────────────────────────────────────────
+export default function SocialScreen() {
   const router = useRouter();
-  const [items, setItems] = useState<FeedItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [creatingTrip, setCreatingTrip] = useState(false);
+  const { user } = useAuth();
+  const [activeTab, setActiveTab] = useState<SubTab>('feed');
+  const [localReactions, setLocalReactions] = useState<Record<string, ReactionKey | null>>({});
 
-  // Scroll-based header shadow
-  const scrollY = useRef(new Animated.Value(0)).current;
-  const headerElevation = scrollY.interpolate({
-    inputRange: [0, 20],
-    outputRange: [0, 1],
-    extrapolate: 'clamp',
-  });
+  const { data: feedData, isLoading: feedLoading, isError: feedError, refetch: refetchFeed } = useFriendFeed(20);
+  const { data: lovedData, isLoading: lovedLoading, refetch: refetchLoved } = useLovedPlaces(user?.id);
+  const { data: recentPlaces = [], isLoading: recentLoading, refetch: refetchRecent } = useRecentPlacesViewed(20);
 
-  const fetchFeed = useCallback(async (cursor?: string) => {
+  const lovedPlaces: LovedPlace[] = (lovedData as any)?.places ?? lovedData ?? [];
+
+  const handleReact = useCallback(async (activityId: string, reaction: ReactionKey) => {
+    const current = localReactions[activityId] ?? null;
+    const next = current === reaction ? null : reaction;
+    setLocalReactions(prev => ({ ...prev, [activityId]: next }));
     try {
-      const url = cursor
-        ? `${BACKEND_URL}/v1/social/feed?limit=20&cursor=${encodeURIComponent(cursor)}`
-        : `${BACKEND_URL}/v1/social/feed?limit=20`;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`Feed returned ${res.status}`);
-      const json = await res.json();
-      const data = json.data;
-      return {
-        items: (data?.items ?? []) as FeedItem[],
-        nextCursor: (data?.next_cursor ?? null) as string | null,
-      };
-    } catch (err) {
-      throw err;
-    }
-  }, []);
-
-  const loadInitial = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const { items: fetched, nextCursor: cursor } = await fetchFeed();
-      setItems(fetched);
-      setNextCursor(cursor);
-    } catch {
-      setError('Could not load your friends feed. Try again.');
-    } finally {
-      setLoading(false);
-    }
-  }, [fetchFeed]);
-
-  const handleRefresh = useCallback(async () => {
-    setRefreshing(true);
-    setError(null);
-    try {
-      const { items: fetched, nextCursor: cursor } = await fetchFeed();
-      setItems(fetched);
-      setNextCursor(cursor);
-    } catch {
-      setError('Could not refresh feed.');
-    } finally {
-      setRefreshing(false);
-    }
-  }, [fetchFeed]);
-
-  const handleLoadMore = useCallback(async () => {
-    if (!nextCursor || loadingMore) return;
-    setLoadingMore(true);
-    try {
-      const { items: more, nextCursor: cursor } = await fetchFeed(nextCursor);
-      setItems((prev) => [...prev, ...more]);
-      setNextCursor(cursor);
-    } catch {
-      // Silent fail on pagination
-    } finally {
-      setLoadingMore(false);
-    }
-  }, [nextCursor, loadingMore, fetchFeed]);
-
-  useEffect(() => {
-    loadInitial();
-  }, [loadInitial]);
-
-  // ── Plan a trip handler ──────────────────────────────────
-
-  const handlePlanTrip = useCallback(async () => {
-    if (creatingTrip) return;
-    setCreatingTrip(true);
-    try {
-      const res = await fetch(`${BACKEND_URL}/v1/planning/sessions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: 'New Trip', friend_ids: [] }),
-      });
-      if (!res.ok) throw new Error(`Failed: ${res.status}`);
-      const json = await res.json();
-      const sessionId = json.data?.session?.id;
-      if (sessionId) {
-        router.push(`/planning/${sessionId}` as any);
+      if (next) {
+        await apiClient.post('/v1/social/react', { activity_id: activityId, reaction: next });
+      } else {
+        await apiClient.delete('/v1/social/react/' + activityId);
       }
     } catch {
-      // Silent fail — user can try again
-    } finally {
-      setCreatingTrip(false);
+      setLocalReactions(prev => ({ ...prev, [activityId]: current }));
     }
-  }, [creatingTrip, router]);
+  }, [localReactions]);
 
-  // ── Reaction handler ────────────────────────────────────────
+  const handlePlacePress = useCallback((placeId: string, placeName?: string) => {
+    router.push({ pathname: '/place/[id]', params: { id: placeId, name: placeName } } as any);
+  }, [router]);
 
-  const handleReact = useCallback(
-    async (itemId: string, reaction: ReactionKey) => {
-      // Optimistic update: toggle or set new reaction
-      setItems((prev) =>
-        prev.map((item) => {
-          if (item.id !== itemId) return item;
-          const isSame = item.myReaction === reaction;
-          return { ...item, myReaction: isSame ? null : reaction };
-        }),
-      );
+  const handleRefresh = useCallback(() => {
+    if (activeTab === 'feed') refetchFeed();
+    else if (activeTab === 'loved') refetchLoved();
+    else refetchRecent();
+  }, [activeTab, refetchFeed, refetchLoved, refetchRecent]);
 
-      const item = items.find((i) => i.id === itemId);
-      const isSame = item?.myReaction === reaction;
+  const feedItems = (feedData?.items ?? []).map(item => ({
+    ...item,
+    myReaction: localReactions[item.id] ?? null,
+  }));
 
-      try {
-        if (isSame) {
-          // Remove reaction
-          await fetch(`${BACKEND_URL}/v1/social/react/${itemId}`, {
-            method: 'DELETE',
-          });
-        } else {
-          // Add reaction
-          await fetch(`${BACKEND_URL}/v1/social/react`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ activity_id: itemId, reaction }),
-          });
-        }
-      } catch {
-        // Revert on failure
-        setItems((prev) =>
-          prev.map((i) => {
-            if (i.id !== itemId) return i;
-            return { ...i, myReaction: item?.myReaction ?? null };
-          }),
-        );
-      }
-    },
-    [items],
-  );
-
-  // ── Place navigation ────────────────────────────────────────
-
-  const handlePlacePress = useCallback(
-    (placeId: string, _placeName: string) => {
-      router.push(`/place/${placeId}` as any);
-    },
-    [router],
-  );
-
-  // ── Render ──────────────────────────────────────────────────
+  const isLoading = activeTab === 'feed' ? feedLoading
+    : activeTab === 'loved' ? lovedLoading
+    : recentLoading;
 
   return (
-    <View style={styles.root}>
-      {/* Animated header with scroll shadow */}
-      <Animated.View
-        style={[
-          styles.header,
-          { paddingTop: TOP_INSET },
-          {
-            shadowOpacity: headerElevation.interpolate({
-              inputRange: [0, 1],
-              outputRange: [0, 0.08],
-            }),
-          },
-        ]}
-      >
-        <TouchableOpacity
-          style={styles.backBtn}
-          onPress={() => router.back()}
-          activeOpacity={0.75}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
+    <View style={[styles.root, { paddingTop: TOP_INSET }]}>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
           <Ionicons name="chevron-back" size={22} color={Colors.textPrimary} />
         </TouchableOpacity>
-
-        <Text style={styles.headerTitle}>Friends</Text>
-
-        {/* Plan a trip button */}
+        <Text style={styles.headerTitle}>Social</Text>
         <TouchableOpacity
           style={styles.planTripBtn}
-          onPress={handlePlanTrip}
-          disabled={creatingTrip}
-          activeOpacity={0.8}
-          accessibilityRole="button"
-          accessibilityLabel="Plan a trip with friends"
+          onPress={() => router.push('/friends' as any)}
+          accessibilityLabel="Friends"
         >
-          {creatingTrip ? (
-            <ActivityIndicator size="small" color={Colors.textOnBrand} />
-          ) : (
-            <Ionicons name="map" size={16} color={Colors.textOnBrand} />
-          )}
+          <Ionicons name="people-outline" size={18} color="#fff" />
         </TouchableOpacity>
-      </Animated.View>
+      </View>
 
-      {/* Feed content */}
-      {loading ? (
+      {/* Sub-tab bar */}
+      <View style={styles.tabBar}>
+        {([
+          { key: 'feed',   label: 'Feed',           icon: 'newspaper-outline' },
+          { key: 'loved',  label: 'Loved Places',   icon: 'heart-outline' },
+          { key: 'recent', label: 'Recently Viewed', icon: 'time-outline' },
+        ] as { key: SubTab; label: string; icon: any }[]).map(tab => (
+          <TouchableOpacity
+            key={tab.key}
+            style={[styles.tabItem, activeTab === tab.key && styles.tabItemActive]}
+            onPress={() => setActiveTab(tab.key)}
+          >
+            <Ionicons
+              name={tab.icon}
+              size={16}
+              color={activeTab === tab.key ? Colors.brandBlue : Colors.textSecondary}
+            />
+            <Text style={[styles.tabLabel, activeTab === tab.key && styles.tabLabelActive]}>
+              {tab.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {/* Content */}
+      {isLoading ? (
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={Colors.brandBlue} />
         </View>
-      ) : error ? (
-        <View style={styles.centered}>
-          <Ionicons
-            name="cloud-offline-outline"
-            size={40}
-            color={Colors.textTertiary}
+      ) : activeTab === 'feed' ? (
+        feedError ? (
+          <View style={styles.centered}>
+            <Ionicons name="cloud-offline-outline" size={40} color={Colors.textTertiary} />
+            <Text style={styles.errorText}>Could not load feed. Check your connection.</Text>
+            <TouchableOpacity style={styles.retryBtn} onPress={() => refetchFeed()}>
+              <Text style={styles.retryText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <FlatList
+            data={feedItems}
+            keyExtractor={item => item.id}
+            contentContainerStyle={styles.listContent}
+            refreshControl={<RefreshControl refreshing={false} onRefresh={handleRefresh} />}
+            ListEmptyComponent={
+              <View style={styles.emptyState}>
+                <Ionicons name="people-outline" size={48} color={Colors.textTertiary} />
+                <Text style={styles.emptyTitle}>No activity yet</Text>
+                <Text style={styles.emptySubtitle}>
+                  When your friends love or visit places, they will show up here.
+                </Text>
+              </View>
+            }
+            renderItem={({ item }) => (
+              <FeedCard item={item} onReact={handleReact} onPlacePress={handlePlacePress} />
+            )}
           />
-          <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity
-            style={styles.retryBtn}
-            onPress={loadInitial}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.retryText}>Retry</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-          onScroll={Animated.event(
-            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-            { useNativeDriver: false },
-          )}
-          scrollEventThrottle={16}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={handleRefresh}
-              tintColor={Colors.brandBlue}
-              colors={[Colors.brandBlue]}
-            />
-          }
-          onScrollEndDrag={({ nativeEvent }) => {
-            const { layoutMeasurement, contentOffset, contentSize } =
-              nativeEvent;
-            const nearBottom =
-              layoutMeasurement.height + contentOffset.y >=
-              contentSize.height - 120;
-            if (nearBottom) handleLoadMore();
-          }}
-        >
-          {items.length === 0 ? (
+        )
+      ) : activeTab === 'loved' ? (
+        <FlatList
+          data={lovedPlaces}
+          keyExtractor={item => item.id}
+          contentContainerStyle={styles.listContent}
+          refreshControl={<RefreshControl refreshing={false} onRefresh={handleRefresh} />}
+          ListEmptyComponent={
             <View style={styles.emptyState}>
-              <Ionicons
-                name="people-outline"
-                size={48}
-                color={Colors.textTertiary}
-              />
-              <Text style={styles.emptyTitle}>No activity yet</Text>
+              <Ionicons name="heart-outline" size={48} color={Colors.textTertiary} />
+              <Text style={styles.emptyTitle}>No loved places yet</Text>
               <Text style={styles.emptySubtitle}>
-                When your friends love places, they will show up here.
+                Tap the heart on any place detail screen to save it here.
               </Text>
             </View>
-          ) : (
-            items.map((item) => (
-              <FeedCard
-                key={item.id}
-                item={item}
-                onReact={handleReact}
-                onPlacePress={handlePlacePress}
-              />
-            ))
+          }
+          renderItem={({ item }) => (
+            <LovedCard
+              item={item}
+              onPress={() => handlePlacePress(item.place_id, item.place_name)}
+            />
           )}
-
-          {loadingMore && (
-            <View style={styles.loadMoreIndicator}>
-              <ActivityIndicator size="small" color={Colors.brandBlue} />
+        />
+      ) : (
+        <FlatList
+          data={recentPlaces}
+          keyExtractor={item => item.id}
+          contentContainerStyle={styles.listContent}
+          refreshControl={<RefreshControl refreshing={false} onRefresh={handleRefresh} />}
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <Ionicons name="time-outline" size={48} color={Colors.textTertiary} />
+              <Text style={styles.emptyTitle}>No recently viewed places</Text>
+              <Text style={styles.emptySubtitle}>
+                Places you open will appear here so you can find them again quickly.
+              </Text>
             </View>
+          }
+          renderItem={({ item }) => (
+            <RecentCard
+              item={item}
+              onPress={() => handlePlacePress(item.place_id, item.place_name)}
+            />
           )}
-        </ScrollView>
+        />
       )}
     </View>
   );
 }
 
 // ─── Styles ───────────────────────────────────────────────────
-
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-
-  // Header
+  root: { flex: 1, backgroundColor: Colors.background },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -557,181 +425,38 @@ const styles = StyleSheet.create({
     elevation: 4,
     zIndex: 10,
   },
-  backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  planTripBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.brandBlue,
-  },
-  headerTitle: {
-    fontSize: Typography.sizes.md,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-  },
-
-  // Scroll
-  scroll: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingHorizontal: Spacing.base,
-    paddingTop: Spacing.md,
-    paddingBottom: 40,
-    gap: Spacing.md,
-  },
-
-  // States
-  centered: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.md,
-  },
-  errorText: {
-    color: Colors.textSecondary,
-    fontSize: Typography.sizes.sm,
-    textAlign: 'center',
-    paddingHorizontal: Spacing.xl,
-  },
-  retryBtn: {
-    paddingHorizontal: Spacing.xl,
-    paddingVertical: Spacing.md,
-    backgroundColor: Colors.brandBlue,
-    borderRadius: BorderRadius.md,
-  },
-  retryText: {
-    color: Colors.textOnBrand,
-    fontWeight: '600',
-    fontSize: Typography.sizes.sm,
-  },
-  emptyState: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingTop: 80,
-    gap: Spacing.md,
-  },
-  emptyTitle: {
-    fontSize: Typography.sizes.md,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-  },
-  emptySubtitle: {
-    fontSize: Typography.sizes.sm,
-    color: Colors.textSecondary,
-    textAlign: 'center',
-    paddingHorizontal: Spacing.xl,
-    lineHeight: 20,
-  },
-  loadMoreIndicator: {
-    paddingVertical: Spacing.lg,
-    alignItems: 'center',
-  },
-
-  // Feed card
-  card: {
-    backgroundColor: Colors.background,
-    borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.08)',
-    padding: Spacing.base,
-    gap: Spacing.sm,
-    ...Shadows.sm,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: Spacing.sm,
-  },
-  cardMeta: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  cardTitleRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'baseline',
-  },
-  friendName: {
-    fontSize: Typography.sizes.sm,
-    fontWeight: '700',
-    color: '#111827',
-  },
-  actionText: {
-    fontSize: Typography.sizes.sm,
-    fontWeight: '400',
-    color: '#6B7280',
-  },
-  placeName: {
-    fontSize: Typography.sizes.sm,
-    fontWeight: '700',
-    color: '#0558E8',
-    marginTop: 2,
-  },
-  timeAgo: {
-    fontSize: 11,
-    color: '#9CA3AF',
-    marginTop: 2,
-    flexShrink: 0,
-  },
-
-  // Review text
-  reviewRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 6,
-    paddingHorizontal: 2,
-  },
-  reviewText: {
-    flex: 1,
-    fontSize: Typography.sizes.sm,
-    color: Colors.textSecondary,
-    lineHeight: 19,
-    fontStyle: 'italic',
-  },
-
-  // Avatar
-  avatar: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
-  avatarInitial: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-  },
-
-  // Reactions
-  reactionBar: {
-    flexDirection: 'row',
-    gap: 6,
-    flexWrap: 'wrap',
-    paddingTop: Spacing.xs,
-  },
-  reactionBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#F9FAFB',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.06)',
-  },
-  reactionBtnActive: {
-    backgroundColor: Colors.brandViolet + '1A', // 10% opacity purple fill
-    borderColor: Colors.brandViolet,
-  },
-  reactionEmoji: {
-    fontSize: 14,
-    lineHeight: 18,
-  },
+  backBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  planTripBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.brandBlue },
+  headerTitle: { fontSize: Typography.sizes.md, fontWeight: '700', color: Colors.textPrimary },
+  tabBar: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: 'rgba(0,0,0,0.07)', backgroundColor: Colors.background },
+  tabItem: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: Spacing.sm, borderBottomWidth: 2, borderBottomColor: 'transparent' },
+  tabItemActive: { borderBottomColor: Colors.brandBlue },
+  tabLabel: { fontSize: 11, fontWeight: '500', color: Colors.textSecondary },
+  tabLabelActive: { color: Colors.brandBlue, fontWeight: '700' },
+  listContent: { paddingHorizontal: Spacing.base, paddingTop: Spacing.md, paddingBottom: 40, gap: Spacing.md },
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.md },
+  errorText: { color: Colors.textSecondary, fontSize: Typography.sizes.sm, textAlign: 'center', paddingHorizontal: Spacing.xl },
+  retryBtn: { paddingHorizontal: Spacing.xl, paddingVertical: Spacing.md, backgroundColor: Colors.brandBlue, borderRadius: BorderRadius.md },
+  retryText: { color: '#fff', fontWeight: '600', fontSize: Typography.sizes.sm },
+  emptyState: { alignItems: 'center', justifyContent: 'center', paddingTop: 80, gap: Spacing.md },
+  emptyTitle: { fontSize: Typography.sizes.md, fontWeight: '700', color: Colors.textPrimary },
+  emptySubtitle: { fontSize: Typography.sizes.sm, color: Colors.textSecondary, textAlign: 'center', paddingHorizontal: Spacing.xl, lineHeight: 20 },
+  card: { backgroundColor: Colors.background, borderRadius: BorderRadius.md, borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)', padding: Spacing.base, gap: Spacing.sm, ...Shadows.sm },
+  cardHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },
+  cardMeta: { flex: 1, justifyContent: 'center' },
+  cardTitleRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline' },
+  friendName: { fontSize: Typography.sizes.sm, fontWeight: '700', color: '#111827' },
+  actionText: { fontSize: Typography.sizes.sm, fontWeight: '400', color: '#6B7280' },
+  placeName: { fontSize: Typography.sizes.sm, fontWeight: '700', color: Colors.brandBlue, marginTop: 2 },
+  timeAgo: { fontSize: 11, color: '#9CA3AF', marginTop: 2, flexShrink: 0 },
+  reviewRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, paddingHorizontal: 2 },
+  reviewText: { flex: 1, fontSize: Typography.sizes.sm, color: Colors.textSecondary, lineHeight: 19, fontStyle: 'italic' },
+  avatar: { alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  avatarInitial: { color: '#FFFFFF', fontWeight: '700' },
+  reactionBar: { flexDirection: 'row', gap: 6, flexWrap: 'wrap', paddingTop: Spacing.xs },
+  reactionBtn: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#F9FAFB', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(0,0,0,0.06)' },
+  reactionBtnActive: { backgroundColor: '#7C3AED1A', borderColor: '#7C3AED' },
+  reactionEmoji: { fontSize: 14, lineHeight: 18 },
+  visitBadge: { backgroundColor: Colors.brandBlue + '15', borderRadius: 8, paddingHorizontal: 7, paddingVertical: 3, alignSelf: 'flex-start' },
+  visitBadgeText: { fontSize: 11, fontWeight: '700', color: Colors.brandBlue },
 });

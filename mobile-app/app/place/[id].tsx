@@ -36,7 +36,7 @@ import QRScannerModal from '@/components/QRScannerModal';
 import { useCheckIn } from '@/services/api/survey';
 import CommunityInsights from '@/components/CommunityInsights';
 import { useMapStore } from '@/store/mapStore';
-import { useWhyThis } from '@/services/api/hooks';
+import { useWhyThis, useIsPlaceLoved, useLovePlaceToggle, useTrackPlaceView } from '@/services/api/hooks';
 import apiClient from '@/services/api/client';
 import { useAuth } from '@/context/AuthContext';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -83,8 +83,12 @@ export default function PlaceDetailScreen() {
 
     // Phase 2 — Social layer state
     const [friendsWhoLove, setFriendsWhoLove] = useState<FriendLovedPlace[]>([]);
-    const [isLoved, setIsLoved] = useState(false);
-    const [loveLoading, setLoveLoading] = useState(false);
+    // Efficient single-place loved check via dedicated endpoint (avoids full list fetch)
+    const { data: isLoved = false } = useIsPlaceLoved(id);
+    const loveMutation = useLovePlaceToggle();
+    const loveLoading = loveMutation.isPending;
+    // Fire-and-forget view tracking
+    const trackView = useTrackPlaceView();
 
     // Check-in flow: QR scanner → check-in API → survey
     const checkIn = useCheckIn();
@@ -96,9 +100,22 @@ export default function PlaceDetailScreen() {
         loadPlace();
         if (id) {
             loadFriendsWhoLove(id);
-            checkIfLoved(id);
         }
     }, [id]);
+
+    // Track the view once place data is available (fire-and-forget)
+    useEffect(() => {
+        if (place && id) {
+            trackView.mutate({
+                place_id: id,
+                place_name: place.name,
+                latitude: place.location?.latitude,
+                longitude: place.location?.longitude,
+                category: place.category,
+            });
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [place?.id]);
 
     const loadPlace = async () => {
         if (!id) return;
@@ -156,42 +173,18 @@ export default function PlaceDetailScreen() {
         }
     };
 
-    // Check if current user has already loved this place
-    const checkIfLoved = async (placeId: string) => {
-        try {
-            const { data: json } = await apiClient.get(`/v1/social/loved-places/${user?.id}`);
-            const places = json.data?.places ?? [];
-            const loved = places.some((p: any) => p.place_id === placeId);
-            setIsLoved(loved);
-        } catch {
-            // Non-blocking
-        }
-    };
-
-    // Toggle Love for this place
-    const handleLoveToggle = useCallback(async () => {
+    // Toggle Love — delegates to shared hook which handles optimistic updates
+    // and query cache invalidation for both the check and the loved list.
+    const handleLoveToggle = useCallback(() => {
         if (!place || loveLoading) return;
-        setLoveLoading(true);
-
-        const newLoved = !isLoved;
-        setIsLoved(newLoved); // optimistic
-
-        try {
-            if (newLoved) {
-                await apiClient.post('/v1/social/loved-places', {
-                    place_id: place.id,
-                    place_name: place.name,
-                    location: place.location,
-                });
-            } else {
-                await apiClient.delete(`/v1/social/loved-places/${place.id}`);
-            }
-        } catch {
-            setIsLoved(!newLoved); // revert on error
-        } finally {
-            setLoveLoading(false);
-        }
-    }, [place, isLoved, loveLoading]);
+        loveMutation.mutate({
+            place_id: place.id,
+            place_name: place.name,
+            currently_loved: isLoved,
+            latitude: place.location?.latitude,
+            longitude: place.location?.longitude,
+        });
+    }, [place, isLoved, loveLoading, loveMutation]);
 
     const handleNavigate = () => {
         if (!place) return;

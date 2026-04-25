@@ -294,19 +294,64 @@ export async function socialRoutes(app: FastifyInstance) {
     },
   });
 
-  // ─── Activity Feed ───────────────────────────────────────
+  // ─── Activity Feed (enriched with actor profiles) ──────────────────
 
   app.get('/feed', {
     preHandler: authMiddleware,
     handler: async (request) => {
       const userId = request.user!.id;
       const { limit, cursor } = request.query as any;
-      const feed = await social.getFriendFeed(userId, parseInt(limit) || 20, cursor);
+      // Use enriched feed that joins actor profile names/avatars in one query
+      const feed = await social.getEnrichedFriendFeed(userId, parseInt(limit) || 20, cursor);
       return envelope({
         items: feed,
         count: feed.length,
         next_cursor: feed.length > 0 ? feed[feed.length - 1].created_at : null,
       });
+    },
+  });
+
+  // ─── Place View Tracking ──────────────────────────────────────
+  // Called silently when the user opens a place detail screen.
+  // Populates recent_places_viewed for the "Recently Viewed" section.
+  app.post('/track-view', {
+    preHandler: authMiddleware,
+    handler: async (request) => {
+      const userId = request.user!.id;
+      const { place_id, place_name, latitude, longitude, category } = request.body as any;
+      if (!place_id) return envelope({ tracked: false });
+      // Fire-and-forget — don't block the response on DB write
+      social.trackPlaceView(userId, place_id, {
+        placeName: place_name,
+        latitude,
+        longitude,
+        category,
+        emitActivity: false,
+      }).catch((err: any) => console.error('[Social] trackPlaceView error:', err));
+      return envelope({ tracked: true });
+    },
+  });
+
+  // Returns the current user's recently viewed places (max 50, ordered by recency).
+  app.get('/recent-views', {
+    preHandler: authMiddleware,
+    handler: async (request) => {
+      const userId = request.user!.id;
+      const { limit } = request.query as any;
+      const places = await social.getRecentPlacesViewed(userId, parseInt(limit) || 20);
+      return envelope({ places, count: places.length });
+    },
+  });
+
+  // Efficient single-place loved check — avoids fetching the entire loved list.
+  // Must be registered BEFORE the /loved-places/:userId wildcard route.
+  app.get('/loved-places/check/:placeId', {
+    preHandler: authMiddleware,
+    handler: async (request) => {
+      const userId = request.user!.id;
+      const { placeId } = request.params as any;
+      const loved = await social.isPlaceLoved(userId, placeId);
+      return envelope({ loved });
     },
   });
 

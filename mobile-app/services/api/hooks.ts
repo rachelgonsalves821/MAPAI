@@ -76,7 +76,6 @@ export const useSendMessage = () => {
  * Hook for accessing the current discovery results (populated by chat).
  */
 export const useDiscoveryResults = () => {
-  const queryClient = useQueryClient();
   return useQuery<Place[]>({
     queryKey: ['places', 'discovery'],
     queryFn: () => Promise.resolve([]), // Populated via manual cache update in useSendMessage
@@ -214,3 +213,162 @@ export const useRoutes = (params: {
     enabled: !!params.place_id && !!params.origin_lat && !!params.origin_lng,
   });
 };
+
+// ─── Recently Viewed Places ───────────────────────────────────────────────────
+
+export interface RecentPlace {
+  id: string;
+  user_id: string;
+  place_id: string;
+  place_name?: string;
+  latitude?: number;
+  longitude?: number;
+  category?: string;
+  view_count: number;
+  first_viewed_at: string;
+  last_viewed_at: string;
+}
+
+/**
+ * Fetches the current user's recently viewed places (up to 50, ordered by
+ * recency). Used to populate the "Recently Viewed" section in the Social tab.
+ */
+export function useRecentPlacesViewed(limit = 20) {
+  return useQuery<RecentPlace[]>({
+    queryKey: ['social', 'recent-views', limit],
+    queryFn: async () => {
+      const res = await apiClient.get('/v1/social/recent-views', { params: { limit } });
+      return (res.data?.data?.places ?? []) as RecentPlace[];
+    },
+    staleTime: 30_000,
+    retry: 1,
+  });
+}
+
+/**
+ * Silently records that the current user viewed a place detail screen.
+ * Returns a fire-and-forget mutation — errors are swallowed so they never
+ * interrupt the user experience.
+ */
+export function useTrackPlaceView() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (params: {
+      place_id: string;
+      place_name?: string;
+      latitude?: number;
+      longitude?: number;
+      category?: string;
+    }) => apiClient.post('/v1/social/track-view', params),
+    onSuccess: () => {
+      // Invalidate so the "Recently Viewed" list refreshes on next render
+      queryClient.invalidateQueries({ queryKey: ['social', 'recent-views'] });
+    },
+    onError: () => {
+      // Silently swallow — view tracking is non-critical
+    },
+  });
+}
+
+// ─── Efficient Loved-Place Check ─────────────────────────────────────────────
+
+/**
+ * Checks whether the current user has loved a specific place.
+ * Uses the dedicated /loved-places/check/:placeId endpoint which is a single
+ * COUNT query — much faster than fetching the entire loved list.
+ */
+export function useIsPlaceLoved(placeId: string | undefined) {
+  return useQuery<boolean>({
+    queryKey: ['social', 'loved-check', placeId],
+    queryFn: async () => {
+      const res = await apiClient.get(`/v1/social/loved-places/check/${placeId}`);
+      return (res.data?.data?.loved ?? false) as boolean;
+    },
+    enabled: !!placeId,
+    staleTime: 60_000,
+  });
+}
+
+/**
+ * Toggle hook — loves or unloves a place and invalidates all related queries.
+ * Accepts the full place metadata so it can be stored in user_loved_places.
+ */
+export function useLovePlaceToggle() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (params: {
+      place_id: string;
+      place_name?: string;
+      currently_loved: boolean;
+      rating?: number;
+      one_line_review?: string;
+      visibility?: 'public' | 'friends' | 'private';
+      latitude?: number;
+      longitude?: number;
+    }) => {
+      if (params.currently_loved) {
+        return apiClient.delete(`/v1/social/loved-places/${params.place_id}`);
+      }
+      return apiClient.post('/v1/social/loved-places', {
+        place_id: params.place_id,
+        place_name: params.place_name,
+        rating: params.rating,
+        one_line_review: params.one_line_review,
+        visibility: params.visibility ?? 'friends',
+        location: params.latitude != null
+          ? { latitude: params.latitude, longitude: params.longitude }
+          : undefined,
+      });
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['social', 'loved-check', variables.place_id] });
+      queryClient.invalidateQueries({ queryKey: ['social', 'loved-places'] });
+    },
+  });
+}
+
+// ─── Friend Activity Feed ─────────────────────────────────────────────────────
+
+export interface FeedItem {
+  id: string;
+  actor_id: string;
+  actor_name?: string | null;
+  actor_username?: string | null;
+  actor_avatar_url?: string | null;
+  activity_type: 'place_loved' | 'place_visited' | 'review_posted' | 'place_shared';
+  place_id: string;
+  place_name?: string;
+  metadata?: {
+    one_line_review?: string;
+    rating?: number;
+    [key: string]: unknown;
+  };
+  created_at: string;
+}
+
+export interface FeedPage {
+  items: FeedItem[];
+  count: number;
+  next_cursor: string | null;
+}
+
+/**
+ * Fetches the first page of the enriched friend activity feed.
+ * The feed includes actor display names and avatar URLs in a single request.
+ */
+export function useFriendFeed(limit = 20) {
+  return useQuery<FeedPage>({
+    queryKey: ['social', 'feed', limit],
+    queryFn: async () => {
+      const res = await apiClient.get('/v1/social/feed', { params: { limit } });
+      const d = res.data?.data ?? {};
+      return {
+        items: (d.items ?? []) as FeedItem[],
+        count: d.count ?? 0,
+        next_cursor: d.next_cursor ?? null,
+      };
+    },
+    staleTime: 30_000,
+    retry: 1,
+  });
+}
