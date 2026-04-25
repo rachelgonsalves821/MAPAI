@@ -76,14 +76,19 @@ BEGIN
     ALTER TABLE reward_redemptions RENAME COLUMN clerk_user_id TO user_id;
   END IF;
 
+  -- planning_members
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='planning_members' AND column_name='clerk_user_id') THEN
+    ALTER TABLE planning_members RENAME COLUMN clerk_user_id TO user_id;
+  END IF;
+
   -- planning_votes
   IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='planning_votes' AND column_name='clerk_user_id') THEN
     ALTER TABLE planning_votes RENAME COLUMN clerk_user_id TO user_id;
   END IF;
 
-  -- planning_items
-  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='planning_items' AND column_name='clerk_user_id') THEN
-    ALTER TABLE planning_items RENAME COLUMN clerk_user_id TO user_id;
+  -- planning_messages
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='planning_messages' AND column_name='clerk_user_id') THEN
+    ALTER TABLE planning_messages RENAME COLUMN clerk_user_id TO user_id;
   END IF;
 END $$;
 
@@ -165,17 +170,29 @@ CREATE POLICY "Users manage own redemptions" ON reward_redemptions FOR ALL
   USING (user_id = auth.uid()::text)
   WITH CHECK (user_id = auth.uid()::text);
 
--- planning_votes
-DROP POLICY IF EXISTS "Members manage own votes" ON planning_votes;
-CREATE POLICY "Members manage own votes" ON planning_votes FOR ALL
-  USING (user_id = auth.uid()::text)
-  WITH CHECK (user_id = auth.uid()::text);
+-- planning_votes (only if table exists)
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='planning_votes') THEN
+    DROP POLICY IF EXISTS "Members manage own votes" ON planning_votes;
+    EXECUTE 'CREATE POLICY "Members manage own votes" ON planning_votes FOR ALL USING (user_id = auth.uid()::text) WITH CHECK (user_id = auth.uid()::text)';
+  END IF;
+END $$;
 
--- planning_items
-DROP POLICY IF EXISTS "Members manage own items" ON planning_items;
-CREATE POLICY "Members manage own items" ON planning_items FOR ALL
-  USING (user_id = auth.uid()::text)
-  WITH CHECK (user_id = auth.uid()::text);
+-- planning_members (only if table exists)
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='planning_members') THEN
+    DROP POLICY IF EXISTS "Members manage own membership" ON planning_members;
+    EXECUTE 'CREATE POLICY "Members manage own membership" ON planning_members FOR ALL USING (user_id = auth.uid()::text) WITH CHECK (user_id = auth.uid()::text)';
+  END IF;
+END $$;
+
+-- planning_messages (only if table exists)
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='planning_messages') THEN
+    DROP POLICY IF EXISTS "Members manage own messages" ON planning_messages;
+    EXECUTE 'CREATE POLICY "Members manage own messages" ON planning_messages FOR ALL USING (user_id = auth.uid()::text) WITH CHECK (user_id = auth.uid()::text)';
+  END IF;
+END $$;
 
 -- ─── Rebuild indexes with new column name ────────────────────────────────────
 
@@ -208,5 +225,9 @@ CREATE INDEX IF NOT EXISTS idx_points_user ON points_transactions(user_id, creat
 DROP INDEX IF EXISTS idx_redemptions_user;
 CREATE INDEX IF NOT EXISTS idx_redemptions_user ON reward_redemptions(user_id);
 
-DROP INDEX IF EXISTS idx_planning_votes_user;
-CREATE INDEX IF NOT EXISTS idx_planning_votes_user ON planning_votes(user_id);
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='planning_votes') THEN
+    DROP INDEX IF EXISTS idx_planning_votes_user;
+    EXECUTE 'CREATE INDEX IF NOT EXISTS idx_planning_votes_user ON planning_votes(user_id)';
+  END IF;
+END $$;
