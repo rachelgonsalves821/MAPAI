@@ -12,7 +12,7 @@ export class ChatService {
      * Create a new chat session for the given user.
      * Returns the session ID (UUID from Supabase).
      */
-    async createSession(clerkUserId: string): Promise<string> {
+    async createSession(userId: string): Promise<string> {
         if (!hasDatabase()) {
             console.warn('[ChatService] No database — returning empty session ID for createSession (configure Supabase to persist chat sessions)');
             return '';
@@ -23,7 +23,7 @@ export class ChatService {
 
         const { data, error } = await (supabase.from('chat_sessions') as any)
             .insert({
-                clerk_user_id: clerkUserId,
+                user_id: userId,
                 created_at: now,
                 updated_at: now,
             })
@@ -44,12 +44,12 @@ export class ChatService {
      */
     async saveMessage(params: {
         sessionId: string;
-        clerkUserId: string;
+        userId: string;
         role: 'user' | 'assistant' | 'system';
         content: string;
         metadata?: Record<string, any>;
     }): Promise<void> {
-        const { sessionId, clerkUserId, role, content, metadata = {} } = params;
+        const { sessionId, userId, role, content, metadata = {} } = params;
 
         if (!hasDatabase()) {
             console.warn('[ChatService] No database — saveMessage is a no-op (configure Supabase to persist chat messages)');
@@ -61,7 +61,7 @@ export class ChatService {
 
         const { error: msgError } = await (supabase.from('chat_messages') as any).insert({
             session_id: sessionId,
-            clerk_user_id: clerkUserId,
+            user_id: userId,
             role,
             content,
             metadata,
@@ -98,7 +98,7 @@ export class ChatService {
 
     /**
      * Retrieve all messages for a session, ordered by creation time ascending.
-     * Also selects clerk_user_id for ownership verification by callers.
+     * Also selects user_id for ownership verification by callers.
      */
     async getSessionHistory(sessionId: string): Promise<any[]> {
         if (!hasDatabase()) {
@@ -109,7 +109,7 @@ export class ChatService {
         const supabase = getSupabase()!;
 
         const { data, error } = await (supabase.from('chat_messages') as any)
-            .select('id, role, content, metadata, clerk_user_id, created_at')
+            .select('id, role, content, metadata, user_id, created_at')
             .eq('session_id', sessionId)
             .order('created_at', { ascending: false })
             .limit(20);
@@ -128,7 +128,7 @@ export class ChatService {
      * When `q` is provided, searches across title, summary, and message content
      * (full-text ILIKE) and returns matching sessions without the 30-day window.
      */
-    async getRecentSessions(clerkUserId: string, limit: number = 20, q?: string): Promise<any[]> {
+    async getRecentSessions(userId: string, limit: number = 20, q?: string): Promise<any[]> {
         if (!hasDatabase()) {
             console.warn('[ChatService] No database — returning empty array for getRecentSessions (configure Supabase to read chat sessions)');
             return [];
@@ -138,7 +138,7 @@ export class ChatService {
 
         // ── Search path ────────────────────────────────────────────────────────
         if (q && q.trim()) {
-            return this.searchSessions(clerkUserId, q.trim(), limit);
+            return this.searchSessions(userId, q.trim(), limit);
         }
 
         // ── Default recent-sessions path ───────────────────────────────────────
@@ -146,7 +146,7 @@ export class ChatService {
 
         const { data, error } = await (supabase.from('chat_sessions') as any)
             .select('id, title, summary, message_count, created_at, updated_at')
-            .eq('clerk_user_id', clerkUserId)
+            .eq('user_id', userId)
             .gte('updated_at', thirtyDaysAgo)
             .order('updated_at', { ascending: false })
             .limit(limit);
@@ -164,7 +164,7 @@ export class ChatService {
      * of any message belonging to that session. Results are deduplicated and
      * returned newest-first.
      */
-    async searchSessions(clerkUserId: string, q: string, limit: number = 50): Promise<any[]> {
+    async searchSessions(userId: string, q: string, limit: number = 50): Promise<any[]> {
         if (!hasDatabase()) {
             console.warn('[ChatService] No database — returning empty array for searchSessions (configure Supabase to search chat sessions)');
             return [];
@@ -176,7 +176,7 @@ export class ChatService {
         // Sessions whose title or summary match the query
         const { data: sessionMatches, error: sessionError } = await (supabase.from('chat_sessions') as any)
             .select('id, title, summary, message_count, created_at, updated_at')
-            .eq('clerk_user_id', clerkUserId)
+            .eq('user_id', userId)
             .or(`title.ilike.${pattern},summary.ilike.${pattern}`)
             .order('updated_at', { ascending: false })
             .limit(limit);
@@ -188,7 +188,7 @@ export class ChatService {
         // Sessions that contain a message matching the query
         const { data: messageMatches, error: messageError } = await (supabase.from('chat_messages') as any)
             .select('session_id')
-            .eq('clerk_user_id', clerkUserId)
+            .eq('user_id', userId)
             .ilike('content', pattern)
             .limit(limit);
 
@@ -206,7 +206,7 @@ export class ChatService {
         if (extraSessionIds.length > 0) {
             const { data: extras, error: extrasError } = await (supabase.from('chat_sessions') as any)
                 .select('id, title, summary, message_count, created_at, updated_at')
-                .eq('clerk_user_id', clerkUserId)
+                .eq('user_id', userId)
                 .in('id', extraSessionIds)
                 .order('updated_at', { ascending: false });
 
@@ -226,10 +226,10 @@ export class ChatService {
     }
 
     /**
-     * Delete a session owned by clerkUserId.
+     * Delete a session owned by userId.
      * Messages are cascade-deleted by the database foreign key constraint.
      */
-    async deleteSession(sessionId: string, clerkUserId: string): Promise<void> {
+    async deleteSession(sessionId: string, userId: string): Promise<void> {
         if (!hasDatabase()) {
             console.warn('[ChatService] No database — deleteSession is a no-op (configure Supabase to delete chat sessions)');
             return;
@@ -240,7 +240,7 @@ export class ChatService {
         const { error } = await (supabase.from('chat_sessions') as any)
             .delete()
             .eq('id', sessionId)
-            .eq('clerk_user_id', clerkUserId);
+            .eq('user_id', userId);
 
         if (error) {
             throw new Error(`Failed to delete session: ${error.message}`);
@@ -248,11 +248,11 @@ export class ChatService {
     }
 
     /**
-     * Update the title and/or summary of a session owned by clerkUserId.
+     * Update the title and/or summary of a session owned by userId.
      */
     async updateSession(
         sessionId: string,
-        clerkUserId: string,
+        userId: string,
         updates: { title?: string; summary?: string }
     ): Promise<void> {
         if (!hasDatabase()) {
@@ -269,7 +269,7 @@ export class ChatService {
         const { error } = await (supabase.from('chat_sessions') as any)
             .update(payload)
             .eq('id', sessionId)
-            .eq('clerk_user_id', clerkUserId);
+            .eq('user_id', userId);
 
         if (error) {
             throw new Error(`Failed to update session: ${error.message}`);
@@ -278,12 +278,12 @@ export class ChatService {
 
     /**
      * Return a session's metadata together with its full message history.
-     * Verifies ownership via clerk_user_id. Returns null when the session
+     * Verifies ownership via user_id. Returns null when the session
      * does not exist or belongs to a different user.
      */
     async getSessionWithMessages(
         sessionId: string,
-        clerkUserId: string
+        userId: string
     ): Promise<{ session: any; messages: any[] } | null> {
         if (!hasDatabase()) {
             console.warn('[ChatService] No database — returning null for getSessionWithMessages (configure Supabase to read chat sessions)');
@@ -295,15 +295,15 @@ export class ChatService {
         const { data: sessionData, error: sessionError } = await (
             supabase.from('chat_sessions') as any
         )
-            .select('id, title, summary, message_count, clerk_user_id, created_at, updated_at')
+            .select('id, title, summary, message_count, user_id, created_at, updated_at')
             .eq('id', sessionId)
             .single();
 
         if (sessionError || !sessionData) return null;
-        if (sessionData.clerk_user_id !== clerkUserId) return null;
+        if (sessionData.user_id !== userId) return null;
 
         const { data: messages, error: msgError } = await (supabase.from('chat_messages') as any)
-            .select('id, role, content, metadata, clerk_user_id, created_at')
+            .select('id, role, content, metadata, user_id, created_at')
             .eq('session_id', sessionId)
             .order('created_at', { ascending: true });
 

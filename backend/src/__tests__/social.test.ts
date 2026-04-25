@@ -13,7 +13,7 @@
  *
  * Schema notes (actual production schema, not the older git-tracked version):
  *  - friendships(requester_id, addressee_id, status)  ← single-edge, no friend_requests table
- *  - user_profiles(clerk_user_id, username, display_name, avatar_url)  ← for search
+ *  - user_profiles(user_id, username, display_name, avatar_url)  ← for search
  *  - blocks(blocker_id, blocked_id)
  *  - activity_events(actor_id, activity_type, place_id, ...)
  *  - user_loved_places(user_id, place_id, rating, visibility, ...)
@@ -1049,7 +1049,7 @@ describe('POST /v1/friends/match-contacts — contact matching', () => {
             stubSupabase({
                 user_profiles: {
                     data: [
-                        { clerk_user_id: 'user-abc', display_name: 'Alice', username: 'alice', avatar_url: null },
+                        { user_id: 'user-abc', display_name: 'Alice', username: 'alice', avatar_url: null },
                     ],
                     error: null,
                 },

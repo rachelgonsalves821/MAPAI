@@ -51,11 +51,11 @@ export async function userRoutes(app: FastifyInstance) {
                 if (hasDatabase()) {
                     const supabase = getSupabase()!;
                     await (supabase.from('user_profiles') as any).upsert({
-                        clerk_user_id: userId,
+                        user_id: userId,
                         display_name: parsed.data.display_name,
                         username: parsed.data.username || '',
                         is_onboarded: parsed.data.is_onboarded ?? true,
-                    }, { onConflict: 'clerk_user_id' });
+                    }, { onConflict: 'user_id' });
                 }
 
                 // Also update legacy users table if preferences provided
@@ -91,7 +91,7 @@ export async function userRoutes(app: FastifyInstance) {
                     const supabase = getSupabase()!;
                     await (supabase.from('user_profiles') as any)
                         .update({ is_onboarded: true })
-                        .eq('clerk_user_id', userId);
+                        .eq('user_id', userId);
                 }
 
                 return envelope({ success: true, onboardingCompleted: true });

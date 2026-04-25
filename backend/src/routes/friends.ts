@@ -42,10 +42,10 @@ export async function friendRoutes(app: FastifyInstance) {
      *
      * Response:
      *   { data: MatchedUser[] }
-     *   where MatchedUser = { clerk_user_id, display_name, username, avatar_url }
+     *   where MatchedUser = { user_id, display_name, username, avatar_url }
      *
      * Deduplication: if the same user matches on both email and phone they
-     * appear only once in the response (keyed by clerk_user_id).
+     * appear only once in the response (keyed by user_id).
      */
     app.post('/match-contacts', {
         preHandler: authMiddleware,
@@ -70,7 +70,7 @@ export async function friendRoutes(app: FastifyInstance) {
             }
 
             const supabase = getSupabase()!;
-            // Accumulate matches, deduped by clerk_user_id
+            // Accumulate matches, deduped by user_id
             const seen = new Map<string, any>();
 
             // ── Email matching ────────────────────────────────────────────
@@ -78,9 +78,9 @@ export async function friendRoutes(app: FastifyInstance) {
                 const { data: emailMatches, error: emailErr } = await (
                     supabase.from('user_profiles') as any
                 )
-                    .select('clerk_user_id, display_name, username, avatar_url')
+                    .select('user_id, display_name, username, avatar_url')
                     .in('email', emails)
-                    .neq('clerk_user_id', callerId);
+                    .neq('user_id', callerId);
 
                 if (emailErr) {
                     app.log.error(emailErr, 'Failed to match contacts by email');
@@ -90,7 +90,7 @@ export async function friendRoutes(app: FastifyInstance) {
                 }
 
                 for (const row of emailMatches ?? []) {
-                    seen.set(row.clerk_user_id, row);
+                    seen.set(row.user_id, row);
                 }
             }
 
@@ -102,9 +102,9 @@ export async function friendRoutes(app: FastifyInstance) {
                 const { data: phoneMatches, error: phoneErr } = await (
                     supabase.from('user_profiles') as any
                 )
-                    .select('clerk_user_id, display_name, username, avatar_url')
+                    .select('user_id, display_name, username, avatar_url')
                     .in('phone', phones)
-                    .neq('clerk_user_id', callerId);
+                    .neq('user_id', callerId);
 
                 if (phoneErr) {
                     // Column may not exist yet — warn but do not abort
@@ -114,8 +114,8 @@ export async function friendRoutes(app: FastifyInstance) {
                     );
                 } else {
                     for (const row of phoneMatches ?? []) {
-                        if (!seen.has(row.clerk_user_id)) {
-                            seen.set(row.clerk_user_id, row);
+                        if (!seen.has(row.user_id)) {
+                            seen.set(row.user_id, row);
                         }
                     }
                 }

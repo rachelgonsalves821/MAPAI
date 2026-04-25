@@ -41,7 +41,7 @@ export class MemoryService {
         const { data, error } = await (supabase as any)
             .from('user_preferences')
             .select('dimension, value, confidence')
-            .or(`user_id.eq.${userId},clerk_user_id.eq.${userId}`)
+            .or(`user_id.eq.${userId},user_id.eq.${userId}`)
             .gte('confidence', 0.3)
             .order('confidence', { ascending: false });
 
@@ -65,7 +65,7 @@ export class MemoryService {
         const { data, error } = await (supabase as any)
             .from('user_preferences')
             .select('*')
-            .or(`user_id.eq.${userId},clerk_user_id.eq.${userId}`)
+            .or(`user_id.eq.${userId},user_id.eq.${userId}`)
             .order('last_updated', { ascending: false });
 
         if (error || !data) return [];
@@ -104,7 +104,7 @@ export class MemoryService {
             const { data: existing } = await (supabase as any)
                 .from('user_preferences')
                 .select('id, confidence')
-                .or(`user_id.eq.${userId},clerk_user_id.eq.${userId}`)
+                .or(`user_id.eq.${userId},user_id.eq.${userId}`)
                 .eq('dimension', insight.type)
                 .eq('value', insight.value)
                 .maybeSingle();
@@ -125,7 +125,7 @@ export class MemoryService {
             } else {
                 await supabase.from('user_preferences').insert({
                     user_id: userId,
-                    clerk_user_id: userId,
+                    user_id: userId,
                     dimension: insight.type,
                     value: insight.value,
                     confidence: insight.confidence,
@@ -138,7 +138,7 @@ export class MemoryService {
 
     /**
      * Manually update preferences (from profile screen or onboarding).
-     * Always writes with clerk_user_id as the canonical identifier.
+     * Always writes with user_id as the canonical identifier.
      * Also sets user_id for backward compatibility with legacy rows.
      */
     async updatePreferences(
@@ -168,12 +168,12 @@ export class MemoryService {
             await (supabase as any)
                 .from('user_preferences')
                 .delete()
-                .or(`clerk_user_id.eq.${userId},user_id.eq.${userId}`)
+                .or(`user_id.eq.${userId},user_id.eq.${userId}`)
                 .eq('dimension', dimension);
 
             if (values.length > 0) {
                 const rows = values.map((v: string) => ({
-                    clerk_user_id: userId,
+                    user_id: userId,
                     user_id: userId,
                     dimension,
                     value: v,
@@ -190,12 +190,12 @@ export class MemoryService {
             await (supabase as any)
                 .from('user_preferences')
                 .delete()
-                .or(`clerk_user_id.eq.${userId},user_id.eq.${userId}`)
+                .or(`user_id.eq.${userId},user_id.eq.${userId}`)
                 .eq('dimension', 'price_preference');
 
             const label = this.priceRangeToLabel(updates.price_range);
             await (supabase.from('user_preferences') as any).insert({
-                clerk_user_id: userId,
+                user_id: userId,
                 user_id: userId,
                 dimension: 'price_preference',
                 value: label,
@@ -209,11 +209,11 @@ export class MemoryService {
             await (supabase as any)
                 .from('user_preferences')
                 .delete()
-                .or(`clerk_user_id.eq.${userId},user_id.eq.${userId}`)
+                .or(`user_id.eq.${userId},user_id.eq.${userId}`)
                 .eq('dimension', 'speed_sensitivity');
 
             await (supabase.from('user_preferences') as any).insert({
-                clerk_user_id: userId,
+                user_id: userId,
                 user_id: userId,
                 dimension: 'speed_sensitivity',
                 value: updates.speed_sensitivity,
@@ -238,7 +238,7 @@ export class MemoryService {
         await (supabase as any)
             .from('user_preferences')
             .delete()
-            .or(`clerk_user_id.eq.${userId},user_id.eq.${userId}`);
+            .or(`user_id.eq.${userId},user_id.eq.${userId}`);
     }
 
     /**
@@ -400,14 +400,14 @@ export class MemoryService {
 
         const supabase = getSupabase()!;
 
-        // The user_preferences table has a UNIQUE constraint on (clerk_user_id, dimension),
+        // The user_preferences table has a UNIQUE constraint on (user_id, dimension),
         // so there is at most one row per dimension per user.  We upsert on that key:
         // if the row already exists (possibly with a different value from an earlier signal),
         // update both the value and bump confidence; otherwise insert fresh.
         const { data: existing } = await (supabase as any)
             .from('user_preferences')
             .select('id, confidence')
-            .eq('clerk_user_id', userId)
+            .eq('user_id', userId)
             .eq('dimension', dimension)
             .maybeSingle();
 
@@ -426,7 +426,7 @@ export class MemoryService {
             await (supabase as any)
                 .from('user_preferences')
                 .insert({
-                    clerk_user_id: userId,
+                    user_id: userId,
                     user_id: userId,
                     dimension,
                     value,

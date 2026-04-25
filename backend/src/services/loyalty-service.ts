@@ -344,7 +344,7 @@ export class LoyaltyService {
 
         const { data } = await (supabase.from('visits') as any)
             .select('id')
-            .eq('clerk_user_id', userId)
+            .eq('user_id', userId)
             .eq('place_id', placeRow.id)
             .gte('visit_date', today)
             .eq('status', 'visited')

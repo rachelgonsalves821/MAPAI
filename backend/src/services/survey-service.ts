@@ -156,7 +156,7 @@ function rowToSurvey(row: any): Survey {
 
     return {
         id: row.id,
-        userId: row.clerk_user_id,
+        userId: row.user_id,
         placeId: row.place_id ?? '',
         placeName: row.place_name ?? '',
         questions,
@@ -194,7 +194,7 @@ export class SurveyService {
             const id = generateId();
             const survey = {
                 id,
-                clerk_user_id: userId,
+                user_id: userId,
                 place_id: placeId,
                 place_name: placeName,
                 question_text: JSON.stringify(SURVEY_QUESTIONS),
@@ -225,7 +225,7 @@ export class SurveyService {
             // Insert a real visit record so the FK constraint is satisfied.
             const { data: visitRow, error: visitErr } = await (supabase.from('visits') as any)
                 .insert({
-                    clerk_user_id: userId,
+                    user_id: userId,
                     place_id: placeUuid,
                     status: 'visited',
                     visit_date: now,
@@ -257,7 +257,7 @@ export class SurveyService {
 
             const { data: visitRow, error: visitErr } = await (supabase.from('visits') as any)
                 .insert({
-                    clerk_user_id: userId,
+                    user_id: userId,
                     place_id: placeUuid,
                     status: 'visited',
                     visit_date: now,
@@ -275,7 +275,7 @@ export class SurveyService {
         const { data: surveyRow, error: surveyErr } = await (supabase.from('surveys') as any)
             .insert({
                 visit_id: visitId,
-                clerk_user_id: userId,
+                user_id: userId,
                 // Repurpose question_text to carry the full question/place metadata as JSON
                 question_text: JSON.stringify(SURVEY_QUESTIONS),
                 processed: false,
@@ -300,7 +300,7 @@ export class SurveyService {
             const cutoff = Date.now() - 24 * 60 * 60 * 1000;
             for (const row of inMemorySurveys.values()) {
                 if (
-                    row.clerk_user_id === userId &&
+                    row.user_id === userId &&
                     !row.processed &&
                     new Date(row.created_at).getTime() > cutoff
                 ) {
@@ -315,7 +315,7 @@ export class SurveyService {
 
         const { data, error } = await (supabase.from('surveys') as any)
             .select('*')
-            .eq('clerk_user_id', userId)
+            .eq('user_id', userId)
             .eq('processed', false)
             .gte('created_at', cutoffIso)
             .order('created_at', { ascending: false })
@@ -344,7 +344,7 @@ export class SurveyService {
         if (!hasDatabase()) {
             const row = inMemorySurveys.get(surveyId);
             if (!row) throw new Error('Survey not found');
-            if (row.clerk_user_id !== userId) throw new Error('Survey not found');
+            if (row.user_id !== userId) throw new Error('Survey not found');
             if (row.processed) throw new Error('Survey already completed');
             if (isExpired(row.created_at)) throw new Error('Survey has expired');
 
@@ -364,7 +364,7 @@ export class SurveyService {
         const { data: existing, error: loadErr } = await (supabase.from('surveys') as any)
             .select('*')
             .eq('id', surveyId)
-            .eq('clerk_user_id', userId)
+            .eq('user_id', userId)
             .maybeSingle();
 
         if (loadErr || !existing) throw new Error('Survey not found');

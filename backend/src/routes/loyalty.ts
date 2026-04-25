@@ -245,7 +245,7 @@ export async function loyaltyRoutes(app: FastifyInstance) {
                 if (placeUuid) {
                     const { error: visitErr } = await (supabase.from('visits') as any)
                         .insert({
-                            clerk_user_id: userId,
+                            user_id: userId,
                             place_id: placeUuid,
                             status: 'visited',
                             visit_date: new Date().toISOString(),

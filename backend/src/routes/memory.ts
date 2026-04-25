@@ -107,7 +107,7 @@ export async function memoryRoutes(app: FastifyInstance) {
             const { data } = await (supabase as any)
                 .from('user_preferences')
                 .select('dimension, value, confidence, last_updated')
-                .or(`user_id.eq.${userId},clerk_user_id.eq.${userId}`)
+                .or(`user_id.eq.${userId},user_id.eq.${userId}`)
                 .order('confidence', { ascending: false });
 
             return envelope({ preferences: data ?? [] });
@@ -141,7 +141,7 @@ export async function memoryRoutes(app: FastifyInstance) {
                 .from('user_preferences')
                 .upsert(
                     {
-                        clerk_user_id: userId,
+                        user_id: userId,
                         user_id: userId,
                         dimension,
                         value,
@@ -150,7 +150,7 @@ export async function memoryRoutes(app: FastifyInstance) {
                         last_updated: new Date().toISOString(),
                         decay_weight: 1.0,
                     },
-                    { onConflict: 'clerk_user_id,dimension' }
+                    { onConflict: 'user_id,dimension' }
                 )
                 .select()
                 .single();
@@ -194,7 +194,7 @@ export async function memoryRoutes(app: FastifyInstance) {
             const { error } = await (supabase as any)
                 .from('user_preferences')
                 .delete()
-                .or(`user_id.eq.${userId},clerk_user_id.eq.${userId}`)
+                .or(`user_id.eq.${userId},user_id.eq.${userId}`)
                 .eq('dimension', dimension);
 
             if (error) {

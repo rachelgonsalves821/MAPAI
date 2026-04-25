@@ -85,7 +85,7 @@ export class UserService {
         await (supabase as any)
             .from('user_preferences')
             .delete()
-            .or(`clerk_user_id.eq.${userId},user_id.eq.${userId}`);
+            .or(`user_id.eq.${userId},user_id.eq.${userId}`);
 
         // Also delete friend connections where user is the friend
         await (supabase.from('friend_connections') as any).delete().eq('friend_id', userId).catch(() => {});
@@ -93,7 +93,7 @@ export class UserService {
         // Also delete from new tables (Clerk migration)
         const newTables = ['chat_messages', 'chat_sessions', 'friendships', 'user_profiles'];
         for (const table of newTables) {
-            const col = table === 'chat_messages' ? 'clerk_user_id' : table === 'friendships' ? 'requester_id' : 'clerk_user_id';
+            const col = table === 'chat_messages' ? 'user_id' : table === 'friendships' ? 'requester_id' : 'user_id';
             await (supabase.from(table) as any).delete().eq(col, userId).catch(() => {});
         }
         // Friendships where user is addressee

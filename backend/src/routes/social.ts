@@ -422,7 +422,7 @@ export async function socialRoutes(app: FastifyInstance) {
   // /v1/users/search run identical query logic against user_profiles.
   //
   // Response: { data: { users: SearchedUser[] } }
-  //   SearchedUser.id  = clerk_user_id  (canonical identifier)
+  //   SearchedUser.id  = user_id  (canonical identifier)
 
   app.get<{ Querystring: { q?: string } }>('/search', {
     preHandler: authMiddleware,

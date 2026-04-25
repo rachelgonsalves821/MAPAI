@@ -10,7 +10,7 @@
  *   display_name — contains match (ILIKE %query%)
  *
  * Returned records are normalised so that the `id` field always holds
- * the Clerk user-id (clerk_user_id column), which is the canonical
+ * the Clerk user-id (user_id column), which is the canonical
  * user identifier throughout the app.
  */
 
@@ -56,21 +56,21 @@ export async function searchUsers(
     const supabase = getSupabase()!;
 
     const { data, error } = await (supabase.from('user_profiles') as any)
-        .select('clerk_user_id, display_name, username, avatar_url')
+        .select('user_id, display_name, username, avatar_url')
         // username prefix-match OR display_name contains-match
         // Sanitize query to prevent PostgREST filter injection
         .or(`username.ilike.${query.replace(/[,%()]/g, '')}%,display_name.ilike.%${query.replace(/[,%()]/g, '')}%`)
-        .neq('clerk_user_id', callerId)
+        .neq('user_id', callerId)
         .limit(limit);
 
     if (error) {
         throw error;
     }
 
-    // Normalise: surface clerk_user_id as `id` for the response shape
+    // Normalise: surface user_id as `id` for the response shape
     // expected by the mobile app (SocialUser.id).
     return (data ?? []).map((row: any) => ({
-        id:           row.clerk_user_id,
+        id:           row.user_id,
         display_name: row.display_name,
         username:     row.username,
         avatar_url:   row.avatar_url ?? null,
