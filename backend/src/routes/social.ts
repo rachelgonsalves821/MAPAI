@@ -274,13 +274,16 @@ export async function socialRoutes(app: FastifyInstance) {
     },
   });
 
-  app.get('/loved-places/:userId', {
+  // ─── Specific loved-places sub-routes MUST come before /:userId wildcard ───
+
+  // Efficient single-place loved check — avoids fetching the entire loved list.
+  app.get('/loved-places/check/:placeId', {
     preHandler: authMiddleware,
     handler: async (request) => {
-      const viewerId = request.user!.id;
-      const { userId } = request.params as any;
-      const places = await social.getLovedPlaces(userId, viewerId);
-      return envelope({ places, count: places.length });
+      const userId = request.user!.id;
+      const { placeId } = request.params as any;
+      const loved = await social.isPlaceLoved(userId, placeId);
+      return envelope({ loved });
     },
   });
 
@@ -291,6 +294,17 @@ export async function socialRoutes(app: FastifyInstance) {
       const { placeId } = request.params as any;
       const friends = await social.getFriendsWhoLovePlace(placeId, userId);
       return envelope({ friends, count: friends.length });
+    },
+  });
+
+  // Wildcard route — must come AFTER all specific /loved-places/* routes
+  app.get('/loved-places/:userId', {
+    preHandler: authMiddleware,
+    handler: async (request) => {
+      const viewerId = request.user!.id;
+      const { userId } = request.params as any;
+      const places = await social.getLovedPlaces(userId, viewerId);
+      return envelope({ places, count: places.length });
     },
   });
 
@@ -340,18 +354,6 @@ export async function socialRoutes(app: FastifyInstance) {
       const { limit } = request.query as any;
       const places = await social.getRecentPlacesViewed(userId, parseInt(limit) || 20);
       return envelope({ places, count: places.length });
-    },
-  });
-
-  // Efficient single-place loved check — avoids fetching the entire loved list.
-  // Must be registered BEFORE the /loved-places/:userId wildcard route.
-  app.get('/loved-places/check/:placeId', {
-    preHandler: authMiddleware,
-    handler: async (request) => {
-      const userId = request.user!.id;
-      const { placeId } = request.params as any;
-      const loved = await social.isPlaceLoved(userId, placeId);
-      return envelope({ loved });
     },
   });
 

@@ -106,6 +106,7 @@ CREATE POLICY "Users manage own reactions"
     ON activity_reactions FOR ALL
     USING (user_id = (current_setting('request.jwt.claims', true)::json ->> 'sub'));
 
--- ─── 4. Add place_name index on user_loved_places for search ─────────────────
+-- ─── 4. Add composite index on user_loved_places for fast per-user queries ────
+-- Note: the column is clerk_user_id (not user_id) — this matches migration 002.
 CREATE INDEX IF NOT EXISTS idx_loved_places_user_updated
-    ON user_loved_places(user_id, updated_at DESC);
+    ON user_loved_places(clerk_user_id, updated_at DESC);

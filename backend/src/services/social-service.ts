@@ -88,14 +88,14 @@ export class SocialService {
         const supabase = getSupabase()!;
         const { data } = await (supabase.from('user_loved_places') as any)
             .upsert({
-                user_id: userId,
+                clerk_user_id: userId,
                 place_id: placeId,
                 rating: opts.rating,
                 one_line_review: opts.oneLineReview,
                 personal_note: opts.personalNote,
                 visibility: opts.visibility || 'friends',
                 last_visited_at: new Date().toISOString(),
-            }, { onConflict: 'user_id,place_id' })
+            }, { onConflict: 'clerk_user_id,place_id' })
             .select()
             .single();
 
@@ -117,7 +117,7 @@ export class SocialService {
         }
         const supabase = getSupabase()!;
         await supabase.from('user_loved_places').delete()
-            .eq('user_id', userId).eq('place_id', placeId);
+            .eq('clerk_user_id', userId).eq('place_id', placeId);
     }
 
     async getLovedPlaces(userId: string, viewerId?: string): Promise<any[]> {
@@ -129,7 +129,7 @@ export class SocialService {
         const supabase = getSupabase()!;
         let query = (supabase.from('user_loved_places') as any)
             .select('*')
-            .eq('user_id', userId)
+            .eq('clerk_user_id', userId)
             .order('updated_at', { ascending: false });
 
         // If viewer is not the owner, filter by visibility
@@ -152,9 +152,9 @@ export class SocialService {
 
         // Get friends who loved this place
         const { data } = await (supabase.from('user_loved_places') as any)
-            .select('user_id, rating, one_line_review, last_visited_at, score_speed, score_value, score_quality')
+            .select('clerk_user_id, rating, one_line_review, last_visited_at, score_speed, score_value, score_quality')
             .eq('place_id', placeId)
-            .in('user_id', friendIds)
+            .in('clerk_user_id', friendIds)
             .neq('visibility', 'private');
 
         return data || [];
@@ -426,7 +426,7 @@ export class SocialService {
         const supabase = getSupabase()!;
         const { count } = await (supabase.from('user_loved_places') as any)
             .select('id', { count: 'exact', head: true })
-            .eq('user_id', userId)
+            .eq('clerk_user_id', userId)
             .eq('place_id', placeId);
         return (count ?? 0) > 0;
     }
@@ -465,10 +465,10 @@ export class SocialService {
         // Batch-fetch actor profiles to avoid N+1 queries
         const uniqueActorIds = [...new Set(events.map((e: any) => e.actor_id))];
         const { data: profiles } = await (supabase.from('user_profiles') as any)
-            .select('user_id, display_name, username, avatar_url')
-            .in('user_id', uniqueActorIds);
+            .select('clerk_user_id, display_name, username, avatar_url')
+            .in('clerk_user_id', uniqueActorIds);
 
-        const profileMap = new Map((profiles || []).map((p: any) => [p.user_id, p]));
+        const profileMap = new Map((profiles || []).map((p: any) => [p.clerk_user_id, p]));
 
         return events.map((row: any) => {
             const profile = profileMap.get(row.actor_id);
