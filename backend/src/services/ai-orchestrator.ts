@@ -15,7 +15,7 @@ import { config } from '../config.js';
 import { getSupabase, hasDatabase } from '../db/supabase-client.js';
 import { v4 as uuid } from 'uuid';
 import { ChatService } from './chat-service.js';
-import { withGeminiRetry } from '../lib/gemini-retry.js';
+import { withGeminiRetry, GeminiAuthError } from '../lib/gemini-retry.js';
 
 interface ChatInput {
     message: string;
@@ -100,12 +100,12 @@ export class AiOrchestrator {
             console.log(`[AI] Provider: Anthropic Claude (${config.anthropic.model})`);
         } else if (this.provider === 'gemini' && config.gemini.apiKey) {
             this.geminiClient = new GoogleGenerativeAI(config.gemini.apiKey);
-            console.log(`[AI] Provider: Google Gemini (${config.gemini.model})`);
+            console.log(`[AI] Provider: Google Gemini (models: ${config.gemini.models.join(', ')})`);
         } else if (config.gemini.apiKey) {
             // Fallback: if requested provider has no key, try gemini
             this.provider = 'gemini';
             this.geminiClient = new GoogleGenerativeAI(config.gemini.apiKey);
-            console.log(`[AI] Provider fallback: Gemini (${config.gemini.model}) — ${config.llmProvider} key missing`);
+            console.log(`[AI] Provider fallback: Gemini (models: ${config.gemini.models.join(', ')}) — ${config.llmProvider} key missing`);
         } else if (config.anthropic.apiKey) {
             // Fallback: try anthropic
             this.provider = 'anthropic';
@@ -225,16 +225,40 @@ export class AiOrchestrator {
             };
         } catch (err: any) {
             const errorMessage = err?.message || String(err);
-            console.error(`[AI] ${this.provider} error: ${errorMessage}`);
 
-            // Automatic fallback: if primary provider fails, try the other one
+            // Auth errors (invalid API key / project permissions) must not trigger
+            // provider-level fallback — a Gemini key will never work with Anthropic.
+            if (err instanceof GeminiAuthError) {
+                console.error(
+                    `[AI] Gemini auth error on model ${err.model} (${err.status}): ${errorMessage}` +
+                    ` — no retry, no provider fallback`,
+                );
+                console.log('LLM responded: NO (auth error)');
+                console.log('=== END PIPELINE TRACE ===\n');
+                return {
+                    text: config.isDev
+                        ? `[Dev] Gemini auth error (${err.status}): ${errorMessage}`
+                        : `I'm having trouble connecting right now. Please try again in a moment.`,
+                    preferenceInsights: [],
+                    sessionId,
+                };
+            }
+
+            console.error(`[AI] ${this.provider} exhausted all models: ${errorMessage}`);
+
+            // Provider-level fallback: only when explicitly enabled and a fallback
+            // provider is configured. Uses the fallback provider's own credentials —
+            // never attempts to reuse the Gemini key with another provider.
             const fallbackProvider = this.provider === 'gemini' ? 'anthropic' : 'gemini';
             const fallbackAvailable =
-                (fallbackProvider === 'anthropic' && this.anthropicClient) ||
-                (fallbackProvider === 'gemini' && this.geminiClient);
+                config.gemini.enableFallbackProvider &&
+                ((fallbackProvider === 'anthropic' && this.anthropicClient) ||
+                 (fallbackProvider === 'gemini' && this.geminiClient));
 
             if (fallbackAvailable) {
-                console.log(`[AI] Attempting fallback to ${fallbackProvider}...`);
+                console.log(
+                    `[AI] All ${this.provider} models failed (transient) — falling back to ${fallbackProvider}`,
+                );
                 try {
                     let rawText: string;
                     if (fallbackProvider === 'gemini') {
@@ -243,7 +267,7 @@ export class AiOrchestrator {
                         rawText = await this.callClaude(fullSystemPrompt, recentMessages);
                     }
 
-                    console.log(`[AI] Fallback to ${fallbackProvider} succeeded`);
+                    console.log(`[AI] Provider fallback to ${fallbackProvider} succeeded`);
                     const parsed = this.parseResponse(rawText);
 
                     messages.push({
@@ -261,11 +285,12 @@ export class AiOrchestrator {
                         sessionId,
                     };
                 } catch (fallbackErr: any) {
-                    console.error(`[AI] Fallback ${fallbackProvider} also failed: ${fallbackErr?.message}`);
+                    console.error(`[AI] Provider fallback to ${fallbackProvider} also failed: ${fallbackErr?.message}`);
                 }
             }
 
             console.log('LLM responded: NO (error)');
+            console.log('=== END PIPELINE TRACE ===\n');
             return {
                 text: config.isDev
                     ? `[Dev] AI error (${this.provider}): ${errorMessage}`
@@ -286,12 +311,13 @@ export class AiOrchestrator {
     async generateFocused(prompt: string): Promise<string> {
         if (this.geminiClient) {
             try {
-                return await withGeminiRetry(this.geminiClient, async (client, modelName) => {
+                return await withGeminiRetry(this.geminiClient, async (client, modelName, signal) => {
                     const model = client.getGenerativeModel({ model: modelName });
-                    const result = await model.generateContent(prompt);
+                    const result = await model.generateContent(prompt, { signal });
                     return result.response.text().trim();
                 });
             } catch (e) {
+                if (e instanceof GeminiAuthError) throw e; // never fall through on auth failure
                 console.warn('[AI] generateFocused: Gemini exhausted, trying Anthropic', (e as Error).message);
                 // Fall through to Anthropic below
             }
@@ -308,7 +334,9 @@ export class AiOrchestrator {
     }
 
     private async callGemini(systemPrompt: string, messages: SessionMessage[]): Promise<string> {
-        return await withGeminiRetry(this.geminiClient!, async (client, modelName) => {
+        // Timeout and AbortController are managed by withGeminiRetry — each attempt
+        // (across all models) receives its own fresh budget via the `signal` param.
+        return await withGeminiRetry(this.geminiClient!, async (client, modelName, signal) => {
             const model = client.getGenerativeModel({
                 model: modelName,
                 systemInstruction: systemPrompt,
@@ -327,31 +355,14 @@ export class AiOrchestrator {
             const lastMessage = messages[messages.length - 1].content;
             const chat = model.startChat({ history });
 
-            // Belt-and-suspenders timeout: AbortController cancels the fetch; Promise.race
-            // covers mid-stream body stalls that AbortController alone cannot cancel.
-            // Budget is per-attempt — each retry gets a fresh 12 s.
-            //
-            // Why 12 s? With 2 retry attempts and a max backoff of 2 s the worst-case
-            // Gemini budget is 12 + 2 + 12 = 26 s, leaving room for DB I/O and the
-            // Places API call within Vercel's 60 s maxDuration window.
-            const controller = new AbortController();
-            const timeoutPromise = new Promise<never>((_, reject) =>
-                setTimeout(() => { controller.abort(); reject(new Error('Gemini call timed out after 12s')); }, 12_000)
-            );
-
-            const result = await Promise.race([
-                chat.sendMessage(lastMessage, { signal: controller.signal }),
-                timeoutPromise,
-            ]);
+            const result = await chat.sendMessage(lastMessage, { signal });
             return result.response.text();
         });
     }
 
     private async callClaude(systemPrompt: string, messages: SessionMessage[]): Promise<string> {
-        // 20 s ceiling for Claude — fits within the 60 s Vercel maxDuration budget
-        // alongside DB overhead and the Places API call.
         const timeoutPromise = new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Claude call timed out after 20s')), 20_000)
+            setTimeout(() => reject(new Error('Claude call timed out after 25s')), 25_000)
         );
 
         const response = await Promise.race([
@@ -569,7 +580,7 @@ Your response:
             const { data: preferences } = await (supabase as any)
                 .from('user_preferences')
                 .select('dimension, value, confidence')
-                .eq('user_id', userId)
+                .eq('clerk_user_id', userId)
                 .gte('confidence', 0.3)
                 .order('confidence', { ascending: false })
                 .limit(15);
@@ -657,9 +668,9 @@ Return ONLY the JSON array:`;
             let extracted: Array<{ dimension: string; value: string; confidence: number }>;
 
             if (this.provider === 'gemini' && this.geminiClient) {
-                const text = await withGeminiRetry(this.geminiClient, async (client, modelName) => {
+                const text = await withGeminiRetry(this.geminiClient, async (client, modelName, signal) => {
                     const model = client.getGenerativeModel({ model: modelName });
-                    const result = await model.generateContent(extractionPrompt);
+                    const result = await model.generateContent(extractionPrompt, { signal });
                     return result.response.text().replace(/```json|```/g, '').trim();
                 });
                 extracted = JSON.parse(text);
@@ -687,7 +698,7 @@ Return ONLY the JSON array:`;
                 const { data: existing } = await (supabase as any)
                     .from('user_preferences')
                     .select('confidence')
-                    .eq('user_id', userId)
+                    .eq('clerk_user_id', userId)
                     .eq('dimension', pref.dimension)
                     .maybeSingle();
 
@@ -697,7 +708,7 @@ Return ONLY the JSON array:`;
                     .from('user_preferences')
                     .upsert(
                         {
-                            user_id: userId,
+                            clerk_user_id: userId,
                             dimension: pref.dimension,
                             value: pref.value,
                             confidence: pref.confidence,
@@ -705,7 +716,7 @@ Return ONLY the JSON array:`;
                             last_updated: new Date().toISOString(),
                             decay_weight: 1.0,
                         },
-                        { onConflict: 'user_id,dimension' }
+                        { onConflict: 'clerk_user_id,dimension' }
                     );
             }
         } catch (err) {
@@ -743,9 +754,9 @@ Return ONLY the two lines, no labels, no quotes:`;
         try {
             let rawOutput: string;
             if (this.provider === 'gemini' && this.geminiClient) {
-                rawOutput = await withGeminiRetry(this.geminiClient, async (client, modelName) => {
+                rawOutput = await withGeminiRetry(this.geminiClient, async (client, modelName, signal) => {
                     const model = client.getGenerativeModel({ model: modelName });
-                    const result = await model.generateContent(prompt);
+                    const result = await model.generateContent(prompt, { signal });
                     return result.response.text().trim();
                 });
             } else if (this.anthropicClient) {

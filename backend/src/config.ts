@@ -9,6 +9,27 @@ import { requireEnv, optionalEnv } from './lib/env.js';
 const nodeEnv = process.env.NODE_ENV || '';
 
 /**
+ * Build the ordered Gemini model priority list.
+ *
+ * Resolution order:
+ *  1. GEMINI_MODELS=model1,model2,model3  (explicit multi-model list)
+ *  2. GEMINI_MODEL + optional GEMINI_FALLBACK_MODEL  (legacy single/dual vars)
+ *  3. Built-in default: gemini-2.5-flash-lite
+ */
+function parseGeminiModels(): string[] {
+    const explicit = process.env.GEMINI_MODELS;
+    if (explicit) {
+        const list = explicit.split(',').map((m) => m.trim()).filter(Boolean);
+        if (list.length > 0) return list;
+    }
+    const primary = process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite';
+    const fallback = process.env.GEMINI_FALLBACK_MODEL || '';
+    const models = [primary];
+    if (fallback && fallback !== primary) models.push(fallback);
+    return models;
+}
+
+/**
  * True only when NODE_ENV is explicitly set to 'development'.
  * If NODE_ENV is missing, we default to secure (NOT dev).
  */
@@ -27,6 +48,7 @@ const PRODUCTION_ORIGINS = [
     'https://mapai.app',
     'https://www.mapai.app',
     'https://mapai-api.fly.dev',
+    'https://mapai-three.vercel.app', // Vercel web deployment
     'exp://',                    // Expo Go deep links
     'https://*.expo.dev',        // EAS Update
 ];
@@ -83,12 +105,22 @@ export const config = {
     // Google Gemini
     gemini: {
         apiKey: process.env.GOOGLE_GEMINI_API_KEY || '',
-        model: optionalEnv('GEMINI_MODEL', 'gemini-2.5-flash-lite'),
-        // Optional: if primary model is exhausted with retryable errors, fall
-        // back to this model once before bubbling to the provider-level
-        // Gemini → Claude fallback. Set GEMINI_FALLBACK_MODEL=gemini-2.5-flash
-        // (the non-lite variant) to tap a different capacity pool on 503s.
-        fallbackModel: optionalEnv('GEMINI_FALLBACK_MODEL', ''),
+        // Ordered model priority list. The retry layer attempts each model in
+        // sequence; the next is only tried when the current one fails for a
+        // transient reason (429, 503, timeout, RESOURCE_EXHAUSTED, etc.).
+        // Configure via GEMINI_MODELS=model1,model2 or legacy GEMINI_MODEL +
+        // GEMINI_FALLBACK_MODEL.
+        models: parseGeminiModels(),
+        // Per-attempt timeout in ms. Each retry and each model gets this full
+        // budget — a single slow response does not consume the budget for the
+        // next model. Increase for Pro-class models if needed.
+        timeoutMs: parseInt(optionalEnv('GEMINI_TIMEOUT_MS', '30000'), 10),
+        // How many times to retry a single model before moving to the next one.
+        // Keep low (2) so we fail over quickly on sustained capacity issues.
+        maxRetriesPerModel: parseInt(optionalEnv('GEMINI_MAX_RETRIES_PER_MODEL', '2'), 10),
+        // Set GEMINI_ENABLE_FALLBACK_PROVIDER=false to disable falling back to
+        // non-Gemini providers after all Gemini models are exhausted.
+        enableFallbackProvider: optionalEnv('GEMINI_ENABLE_FALLBACK_PROVIDER', 'true') !== 'false',
     },
 
     // Google Places

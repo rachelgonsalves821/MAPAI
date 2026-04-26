@@ -149,7 +149,9 @@
       "Bash(openssl rand:*)",
       "Bash(git checkout:*)",
       "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\('scripts',{}\\), indent=2\\)\\)\")",
-      "Bash(python3 *)"
+      "Bash(python3 *)",
+      "Bash(flyctl secrets *)",
+      "Bash(git pull *)"
     ]
   }
 }

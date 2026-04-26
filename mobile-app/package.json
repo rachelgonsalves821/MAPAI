@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "scripts": {
     "start": "expo start",
+    "start:remote": "EXPO_PUBLIC_BACKEND_URL=https://mapai-api.fly.dev expo start",
     "start:tunnel": "node scripts/start-tunnel.js",
     "android": "expo start --android",
     "ios": "expo start --ios",

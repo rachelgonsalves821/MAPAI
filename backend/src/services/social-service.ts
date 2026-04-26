@@ -91,6 +91,7 @@ export class SocialService {
             .upsert({
                 user_id: userId,
                 place_id: placeId,
+                place_name: opts.placeName,
                 rating: opts.rating,
                 one_line_review: opts.oneLineReview,
                 personal_note: opts.personalNote,

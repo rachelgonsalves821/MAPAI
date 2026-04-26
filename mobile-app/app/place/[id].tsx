@@ -578,6 +578,18 @@ export default function PlaceDetailScreen() {
                     </TouchableOpacity>
                 </View>
 
+                {/* Leave a Review button */}
+                <TouchableOpacity
+                    style={styles.reviewButton}
+                    onPress={() => setReviewModalVisible(true)}
+                    activeOpacity={0.8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Leave a review for this place"
+                >
+                    <Ionicons name="create-outline" size={18} color={Colors.textOnBrand} />
+                    <Text style={styles.reviewButtonText}>Leave a Review</Text>
+                </TouchableOpacity>
+
                 {/* Social Signals section (PRD §8.3.3) */}
                 <View style={styles.section}>
                     <Text style={styles.sectionTitle}>What people are saying</Text>
@@ -1105,6 +1117,22 @@ const styles = StyleSheet.create({
     },
     ctaPrimaryText: {
         color: Colors.textOnBrand,
+    },
+    reviewButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        marginHorizontal: Spacing.base,
+        marginBottom: Spacing.md,
+        paddingVertical: Spacing.md,
+        borderRadius: BorderRadius.md,
+        backgroundColor: '#10B981',
+    },
+    reviewButtonText: {
+        color: Colors.textOnBrand,
+        fontSize: Typography.sizes.sm,
+        fontWeight: '700',
     },
 
     // Section

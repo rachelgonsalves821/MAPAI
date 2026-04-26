@@ -10,7 +10,12 @@
         "simulator": true
       },
       "env": {
-        "APP_ENV": "development"
+        "APP_ENV": "development",
+        "EXPO_PUBLIC_BACKEND_URL": "https://mapai-api.fly.dev",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://zsrnaxzkjsitwjdcelob.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_unI2OSPos5-wPpecPlAJlA_9O9nbELS",
+        "EXPO_PUBLIC_GOOGLE_PLACES_API_KEY": "AIzaSyBflQIEZtLzpcDEAQINd7szeZ-20PrtG7c",
+        "EXPO_PUBLIC_GOOGLE_MAPS_SDK_KEY": "AIzaSyBflQIEZtLzpcDEAQINd7szeZ-20PrtG7c"
       }
     },
     "staging": {
@@ -36,7 +41,11 @@
       "autoIncrement": true,
       "env": {
         "APP_ENV": "production",
-        "EXPO_PUBLIC_BACKEND_URL": "https://mapai-api.fly.dev"
+        "EXPO_PUBLIC_BACKEND_URL": "https://mapai-api.fly.dev",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://zsrnaxzkjsitwjdcelob.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_unI2OSPos5-wPpecPlAJlA_9O9nbELS",
+        "EXPO_PUBLIC_GOOGLE_PLACES_API_KEY": "AIzaSyBflQIEZtLzpcDEAQINd7szeZ-20PrtG7c",
+        "EXPO_PUBLIC_GOOGLE_MAPS_SDK_KEY": "AIzaSyBflQIEZtLzpcDEAQINd7szeZ-20PrtG7c"
       }
     }
   },

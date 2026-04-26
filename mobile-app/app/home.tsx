@@ -25,7 +25,7 @@ import ChatOverlay from '@/components/ChatOverlay';
 import { useMapStore } from '@/store/mapStore';
 import { useUIStore } from '@/store/uiStore';
 import { Place } from '@/types';
-import { BACKEND_URL } from '@/constants/api';
+import apiClient from '@/services/api/client';
 
 // ─── Layout constants ────────────────────────────────────────
 
@@ -41,9 +41,8 @@ export default function HomeScreen() {
 
   // Fetch points balance on mount
   useEffect(() => {
-    fetch(`${BACKEND_URL}/v1/loyalty/balance`)
-      .then(r => r.json())
-      .then(d => setPointsBalance(d.data?.balance ?? 0))
+    apiClient.get('/v1/loyalty/balance')
+      .then(r => setPointsBalance(r.data?.data?.balance ?? 0))
       .catch(() => {});
   }, []);
 

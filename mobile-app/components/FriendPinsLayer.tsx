@@ -18,7 +18,7 @@ import {
 import { Callout, Marker } from 'react-native-maps';
 import { Colors, Shadows, Spacing, Typography } from '@/constants/theme';
 
-import { BACKEND_URL } from '@/constants/api';
+import apiClient from '@/services/api/client';
 
 // ─── Constants ────────────────────────────────────────────────
 
@@ -192,11 +192,8 @@ export default function FriendPinsLayer() {
 
     async function fetchPins() {
       try {
-        const res = await fetch(
-          `${BACKEND_URL}/v1/social/feed?limit=50`,
-        );
-        if (!res.ok) return;
-        const json = await res.json();
+        const res = await apiClient.get('/v1/social/feed?limit=50');
+        const json = res.data;
         const rawItems: RawFeedItem[] = json.data?.items ?? [];
 
         // Only consider "loved_place" activity types for the pins
