@@ -488,7 +488,7 @@ export class SocialService {
         const profileMap = new Map((profiles || []).map((p: any) => [p.user_id, p]));
 
         return events.map((row: any) => {
-            const profile = profileMap.get(row.actor_id);
+            const profile = profileMap.get(row.actor_id) as any;
             return {
                 ...row,
                 actor_name: profile?.display_name ?? null,

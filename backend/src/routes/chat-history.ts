@@ -188,7 +188,7 @@ export async function chatHistoryRoutes(app: FastifyInstance) {
             try {
                 await chatService.saveMessage({
                     sessionId,
-                    clerkUserId: userId,
+                    userId,
                     role,
                     content,
                     metadata: metadata as Record<string, any> | undefined,

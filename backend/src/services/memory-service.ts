@@ -125,7 +125,6 @@ export class MemoryService {
             } else {
                 await supabase.from('user_preferences').insert({
                     user_id: userId,
-                    user_id: userId,
                     dimension: insight.type,
                     value: insight.value,
                     confidence: insight.confidence,
@@ -174,7 +173,6 @@ export class MemoryService {
             if (values.length > 0) {
                 const rows = values.map((v: string) => ({
                     user_id: userId,
-                    user_id: userId,
                     dimension,
                     value: v,
                     confidence: 0.95,
@@ -196,7 +194,6 @@ export class MemoryService {
             const label = this.priceRangeToLabel(updates.price_range);
             await (supabase.from('user_preferences') as any).insert({
                 user_id: userId,
-                user_id: userId,
                 dimension: 'price_preference',
                 value: label,
                 confidence: 0.95,
@@ -213,7 +210,6 @@ export class MemoryService {
                 .eq('dimension', 'speed_sensitivity');
 
             await (supabase.from('user_preferences') as any).insert({
-                user_id: userId,
                 user_id: userId,
                 dimension: 'speed_sensitivity',
                 value: updates.speed_sensitivity,
@@ -426,7 +422,6 @@ export class MemoryService {
             await (supabase as any)
                 .from('user_preferences')
                 .insert({
-                    user_id: userId,
                     user_id: userId,
                     dimension,
                     value,

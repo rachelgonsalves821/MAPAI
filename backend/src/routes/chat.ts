@@ -72,7 +72,7 @@ export async function chatRoutes(app: FastifyInstance) {
                 try {
                     await chat.saveMessage({
                         sessionId,
-                        clerkUserId: userId,
+                        userId,
                         role: 'user',
                         content: message,
                     });
@@ -105,7 +105,7 @@ export async function chatRoutes(app: FastifyInstance) {
                 try {
                     await chat.saveMessage({
                         sessionId,
-                        clerkUserId: userId,
+                        userId,
                         role: 'assistant',
                         content: aiResponse.text,
                     });

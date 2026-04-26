@@ -142,7 +142,6 @@ export async function memoryRoutes(app: FastifyInstance) {
                 .upsert(
                     {
                         user_id: userId,
-                        user_id: userId,
                         dimension,
                         value,
                         confidence: Math.min(confidence, 1.0),
