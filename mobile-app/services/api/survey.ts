@@ -108,3 +108,32 @@ export function useSubmitSurvey() {
     },
   });
 }
+
+/**
+ * Submit a place review (rating + optional text).
+ * Awards loyalty points on the backend for first review per place.
+ * Invalidates loyalty queries so the balance refreshes.
+ */
+export function useSubmitReview() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    { points_awarded: number; balance: number },
+    Error,
+    { placeId: string; rating: number; reviewText?: string; placeName?: string }
+  >({
+    mutationFn: ({ placeId, rating, reviewText, placeName }) =>
+      apiClient
+        .post(`/v1/reviews/places/${placeId}`, {
+          rating,
+          review_text: reviewText,
+          place_name: placeName,
+        })
+        .then((r) => ({
+          points_awarded: 5,
+          balance: r.data?.data?.balance ?? 0,
+        })),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['loyalty'] });
+    },
+  });
+}

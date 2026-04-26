@@ -43,7 +43,7 @@ async function loadUserProfile(userId: string, sbUser: SupabaseUser): Promise<Us
     const { data } = await supabase
       .from('user_profiles')
       .select('display_name, username, avatar_url, is_onboarded')
-      .eq('clerk_user_id', userId)
+      .eq('user_id', userId)
       .maybeSingle();
 
     return {

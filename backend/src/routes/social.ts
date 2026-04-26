@@ -247,6 +247,17 @@ export async function socialRoutes(app: FastifyInstance) {
 
   // ─── Loved Places ────────────────────────────────────────
 
+  app.get('/loved-places/check/:placeId', {
+    preHandler: authMiddleware,
+    handler: async (request) => {
+      const userId = request.user!.id;
+      const { placeId } = request.params as any;
+      const places = await social.getLovedPlaces(userId, userId);
+      const loved = places.some((p: any) => p.place_id === placeId);
+      return envelope({ loved });
+    },
+  });
+
   app.post('/loved-places', {
     preHandler: authMiddleware,
     handler: async (request, reply) => {

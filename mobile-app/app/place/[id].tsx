@@ -33,10 +33,11 @@ import { Place, SocialSignal } from '@/types';
 import { getPlacePhotoUrl } from '@/services/places';
 import SurveyModal, { SurveyData } from '@/components/SurveyModal';
 import QRScannerModal from '@/components/QRScannerModal';
+import ReviewModal from '@/components/ReviewModal';
 import { useCheckIn } from '@/services/api/survey';
 import CommunityInsights from '@/components/CommunityInsights';
 import { useMapStore } from '@/store/mapStore';
-import { useWhyThis, useIsPlaceLoved, useLovePlaceToggle, useTrackPlaceView } from '@/services/api/hooks';
+import { useWhyThis } from '@/services/api/hooks';
 import apiClient from '@/services/api/client';
 import { useAuth } from '@/context/AuthContext';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -83,18 +84,16 @@ export default function PlaceDetailScreen() {
 
     // Phase 2 — Social layer state
     const [friendsWhoLove, setFriendsWhoLove] = useState<FriendLovedPlace[]>([]);
-    // Efficient single-place loved check via dedicated endpoint (avoids full list fetch)
-    const { data: isLoved = false } = useIsPlaceLoved(id);
-    const loveMutation = useLovePlaceToggle();
-    const loveLoading = loveMutation.isPending;
-    // Fire-and-forget view tracking
-    const trackView = useTrackPlaceView();
+    const [isLoved, setIsLoved] = useState(false);
+    const [loveLoading, setLoveLoading] = useState(false);
 
     // Check-in flow: QR scanner → check-in API → survey
     const checkIn = useCheckIn();
     const [qrScannerVisible, setQrScannerVisible] = useState(false);
     const [surveyModalVisible, setSurveyModalVisible] = useState(false);
     const [currentSurvey, setCurrentSurvey] = useState<SurveyData | null>(null);
+    const [reviewModalVisible, setReviewModalVisible] = useState(false);
+    const [pointsToast, setPointsToast] = useState<string | null>(null);
 
     useEffect(() => {
         loadPlace();
@@ -103,19 +102,11 @@ export default function PlaceDetailScreen() {
         }
     }, [id]);
 
-    // Track the view once place data is available (fire-and-forget)
     useEffect(() => {
-        if (place && id) {
-            trackView.mutate({
-                place_id: id,
-                place_name: place.name,
-                latitude: place.location?.latitude,
-                longitude: place.location?.longitude,
-                category: place.category,
-            });
+        if (id && user?.id) {
+            checkIfLoved(id);
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [place?.id]);
+    }, [id, user?.id]);
 
     const loadPlace = async () => {
         if (!id) return;
@@ -173,18 +164,44 @@ export default function PlaceDetailScreen() {
         }
     };
 
-    // Toggle Love — delegates to shared hook which handles optimistic updates
-    // and query cache invalidation for both the check and the loved list.
-    const handleLoveToggle = useCallback(() => {
+    // Check if current user has already loved this place
+    const checkIfLoved = async (placeId: string) => {
+        if (!user?.id) return;
+        try {
+            const { data: json } = await apiClient.get(`/v1/social/loved-places/${user.id}`);
+            const places = json.data?.places ?? [];
+            const loved = places.some((p: any) => p.place_id === placeId);
+            setIsLoved(loved);
+        } catch {
+            // Non-blocking
+        }
+    };
+
+    // Toggle Love for this place
+    const handleLoveToggle = useCallback(async () => {
         if (!place || loveLoading) return;
-        loveMutation.mutate({
-            place_id: place.id,
-            place_name: place.name,
-            currently_loved: isLoved,
-            latitude: place.location?.latitude,
-            longitude: place.location?.longitude,
-        });
-    }, [place, isLoved, loveLoading, loveMutation]);
+        setLoveLoading(true);
+
+        const newLoved = !isLoved;
+        setIsLoved(newLoved); // optimistic
+
+        try {
+            if (newLoved) {
+                await apiClient.post('/v1/social/loved-places', {
+                    place_id: place.id,
+                    place_name: place.name,
+                    location: place.location,
+                });
+            } else {
+                await apiClient.delete(`/v1/social/loved-places/${place.id}`);
+            }
+        } catch {
+            setIsLoved(!newLoved);
+            Alert.alert('Could not save', 'Please try again in a moment.');
+        } finally {
+            setLoveLoading(false);
+        }
+    }, [place, isLoved, loveLoading]);
 
     const handleNavigate = () => {
         if (!place) return;
@@ -233,11 +250,29 @@ export default function PlaceDetailScreen() {
     const handleSurveyComplete = useCallback(() => {
         setSurveyModalVisible(false);
         setCurrentSurvey(null);
-    }, []);
+        // After survey, offer a review
+        if (place) {
+            setReviewModalVisible(true);
+        }
+    }, [place]);
 
     const handleSurveySkip = useCallback(() => {
         setSurveyModalVisible(false);
         setCurrentSurvey(null);
+        // After skipping survey, still offer a review
+        if (place) {
+            setReviewModalVisible(true);
+        }
+    }, [place]);
+
+    const handleReviewComplete = useCallback((pointsAwarded: number) => {
+        setReviewModalVisible(false);
+        Alert.alert('Review saved!', `+${pointsAwarded} points earned`);
+        if (id) checkIfLoved(id);
+    }, [id]);
+
+    const handleReviewSkip = useCallback(() => {
+        setReviewModalVisible(false);
     }, []);
 
     if (loading) {
@@ -684,6 +719,17 @@ export default function PlaceDetailScreen() {
                     survey={currentSurvey}
                     onComplete={handleSurveyComplete}
                     onSkip={handleSurveySkip}
+                />
+            )}
+
+            {/* Review modal — shown after check-in survey */}
+            {place && (
+                <ReviewModal
+                    visible={reviewModalVisible}
+                    placeId={place.id}
+                    placeName={place.name}
+                    onComplete={handleReviewComplete}
+                    onSkip={handleReviewSkip}
                 />
             )}
         </View>

@@ -300,7 +300,7 @@ export class LoyaltyService {
     // ─── Domain-specific award helpers ────────────────────────────────────────
 
     async awardForReview(userId: string, placeId: string): Promise<{ balance: number; transaction: any }> {
-        return this.awardPoints(userId, 'review', 3, placeId, 'Points for writing a review');
+        return this.awardPoints(userId, 'review', 5, placeId, 'Points for writing a review');
     }
 
     async awardForSurvey(userId: string, surveyId: string): Promise<{ balance: number; transaction: any }> {
