@@ -8,7 +8,7 @@
  *  - ChatOverlay bottom sheet anchored at the bottom
  */
 
-import React, { useCallback, useRef, useState, useEffect } from 'react';
+import React, { useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -25,7 +25,7 @@ import ChatOverlay from '@/components/ChatOverlay';
 import { useMapStore } from '@/store/mapStore';
 import { useUIStore } from '@/store/uiStore';
 import { Place } from '@/types';
-import apiClient from '@/services/api/client';
+import { useLoyaltyBalance } from '@/services/api/hooks';
 
 // ─── Layout constants ────────────────────────────────────────
 
@@ -37,14 +37,7 @@ export default function HomeScreen() {
   const router = useRouter();
   const { discoveryPlaces, selectedPlace, setSelectedPlace } = useMapStore();
   const { mapOpacity } = useUIStore();
-  const [pointsBalance, setPointsBalance] = useState<number | null>(null);
-
-  // Fetch points balance on mount
-  useEffect(() => {
-    apiClient.get('/v1/loyalty/balance')
-      .then(r => setPointsBalance(r.data?.data?.balance ?? 0))
-      .catch(() => {});
-  }, []);
+  const { data: pointsBalance = null } = useLoyaltyBalance();
 
   const dimOpacity = useRef(new Animated.Value(0)).current;
 

@@ -36,6 +36,7 @@ import QRScannerModal from '@/components/QRScannerModal';
 import ReviewModal from '@/components/ReviewModal';
 import { useCheckIn } from '@/services/api/survey';
 import CommunityInsights from '@/components/CommunityInsights';
+import { useQueryClient } from '@tanstack/react-query';
 import { useMapStore } from '@/store/mapStore';
 import { useWhyThis } from '@/services/api/hooks';
 import apiClient from '@/services/api/client';
@@ -74,6 +75,7 @@ export default function PlaceDetailScreen() {
     const { id } = useLocalSearchParams<{ id: string }>();
     const router = useRouter();
     const { user } = useAuth();
+    const queryClient = useQueryClient();
     const [place, setPlace] = useState<Place | null>(null);
     const [loading, setLoading] = useState(true);
     const [activePhotoIndex, setActivePhotoIndex] = useState(0);
@@ -195,6 +197,7 @@ export default function PlaceDetailScreen() {
             } else {
                 await apiClient.delete(`/v1/social/loved-places/${place.id}`);
             }
+            queryClient.invalidateQueries({ queryKey: ['social', 'loved-places'] });
         } catch {
             setIsLoved(!newLoved);
             Alert.alert('Could not save', 'Please try again in a moment.');
@@ -268,8 +271,9 @@ export default function PlaceDetailScreen() {
     const handleReviewComplete = useCallback((pointsAwarded: number) => {
         setReviewModalVisible(false);
         Alert.alert('Review saved!', `+${pointsAwarded} points earned`);
+        queryClient.invalidateQueries({ queryKey: ['loyalty', 'balance'] });
         if (id) checkIfLoved(id);
-    }, [id]);
+    }, [id, queryClient]);
 
     const handleReviewSkip = useCallback(() => {
         setReviewModalVisible(false);

@@ -252,7 +252,6 @@ export async function socialRoutes(app: FastifyInstance) {
     handler: async (request, reply) => {
       const userId = request.user!.id;
       const { place_id, rating, one_line_review, personal_note, visibility, place_name, location } = request.body as any;
-      console.log('[Route] POST /loved-places received place_id:', place_id, 'place_name:', place_name);
       if (!place_id) {
         return reply.status(400).send(errorResponse(400, 'place_id is required', 'ValidationError'));
       }

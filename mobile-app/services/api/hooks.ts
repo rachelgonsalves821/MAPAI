@@ -380,3 +380,17 @@ export function useFriendFeed(limit = 20) {
     retry: 1,
   });
 }
+
+export function useLoyaltyBalance() {
+  const { user } = useAuth();
+  return useQuery<number>({
+    queryKey: ['loyalty', 'balance', user?.id],
+    queryFn: async () => {
+      const res = await apiClient.get('/v1/loyalty/balance');
+      return res.data?.data?.balance ?? 0;
+    },
+    enabled: !!user?.id,
+    staleTime: 60_000,
+    retry: 1,
+  });
+}
