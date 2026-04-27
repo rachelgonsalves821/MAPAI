@@ -266,7 +266,7 @@ function LovedTab() {
     const router = useRouter();
     const { user } = useAuth();
     const { data, isLoading, refetch, isRefetching } = useLovedPlaces(user?.id);
-    const places = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
+    const places: any[] = data?.places ?? [];
 
     if (isLoading) {
         return (

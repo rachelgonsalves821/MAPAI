@@ -8,7 +8,7 @@ import {
   View, Text, StyleSheet, Platform, ScrollView, TouchableOpacity,
   ActivityIndicator, Alert, Modal, RefreshControl,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, BorderRadius, Shadows } from '@/constants/theme';
 import { BACKEND_URL } from '@/constants/api';
@@ -147,6 +147,7 @@ export default function RewardsScreen() {
   }, []);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
+  useFocusEffect(useCallback(() => { fetchAll(); }, [fetchAll]));
 
   const handleRedeem = (reward: Reward) => {
     if (!balanceData || balanceData.balance < reward.points_required) return;
