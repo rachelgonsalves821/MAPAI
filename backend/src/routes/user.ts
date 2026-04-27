@@ -94,11 +94,11 @@ export async function userRoutes(app: FastifyInstance) {
                     // — the onboarding step already wrote them; this is a guard)
                     await (supabase.from('user_profiles') as any)
                         .upsert({
-                            user_id: userId,
+                            clerk_user_id: userId,
                             is_onboarded: true,
                             display_name: (request.body as any)?.display_name || '',
                             username: (request.body as any)?.username || '',
-                        }, { onConflict: 'user_id' });
+                        }, { onConflict: 'clerk_user_id' });
                 }
 
                 return envelope({ success: true, onboardingCompleted: true });
