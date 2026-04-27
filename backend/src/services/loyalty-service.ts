@@ -128,7 +128,7 @@ export class LoyaltyService {
         const supabase = getSupabase()!;
         let query = (supabase.from('points_transactions') as any)
             .select('*')
-            .eq('clerk_user_id', userId)
+            .eq('user_id', userId)
             .order('created_at', { ascending: false })
             .limit(limit);
 
@@ -179,7 +179,7 @@ export class LoyaltyService {
         // Insert transaction
         const { data: tx } = await (supabase.from('points_transactions') as any)
             .insert({
-                clerk_user_id: userId,
+                user_id: userId,
                 points,
                 transaction_type: type,
                 reference_id: referenceId ?? null,
@@ -192,7 +192,7 @@ export class LoyaltyService {
         const currentBalance = await this.getBalance(userId);
         await (supabase.from('users') as any)
             .update({ points_balance: currentBalance + points })
-            .eq('clerk_user_id', userId);
+            .eq('user_id', userId);
 
         const newBalance = currentBalance + points;
         return { balance: newBalance, transaction: tx };
