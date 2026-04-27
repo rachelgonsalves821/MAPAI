@@ -26,7 +26,7 @@ interface ReviewModalProps {
   visible: boolean;
   placeId: string;
   placeName: string;
-  onComplete: (pointsAwarded: number) => void;
+  onComplete: (pointsAwarded: number, newBalance: number) => void;
   onSkip: () => void;
 }
 
@@ -69,7 +69,7 @@ export default function ReviewModal({
         reviewText: reviewText.trim() || undefined,
         placeName,
       });
-      onComplete(result.points_awarded);
+      onComplete(result.points_awarded, result.balance);
     } catch {
       Alert.alert('Could not save review', 'Please try again.');
     }

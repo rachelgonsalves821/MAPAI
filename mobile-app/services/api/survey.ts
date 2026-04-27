@@ -129,10 +129,10 @@ export function useSubmitReview() {
           place_name: placeName,
         })
         .then((r) => ({
-          points_awarded: 5,
+          points_awarded: r.data?.data?.points_awarded ?? 0,
           balance: r.data?.data?.balance ?? 0,
         })),
-    onSuccess: () => {
+    onSuccess: (_data, _vars, _ctx) => {
       queryClient.invalidateQueries({ queryKey: ['loyalty'] });
     },
   });

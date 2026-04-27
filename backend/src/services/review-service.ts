@@ -60,11 +60,17 @@ export class ReviewService {
             .then(() => {});  // fire-and-forget
 
         // Award points on first review for this place
+        let points_awarded = 0;
+        let balance = 0;
         if (isNew) {
-            await this.loyalty.awardForReview(userId, placeId);
+            const reward = await this.loyalty.awardForReview(userId, placeId);
+            points_awarded = reward.transaction?.points ?? 0;
+            balance = reward.balance;
+        } else {
+            balance = await this.loyalty.getBalance(userId);
         }
 
-        return data;
+        return { review: data, points_awarded, balance };
     }
 
     // ─── Get Single Review (user + place) ─────────────────────────────────────

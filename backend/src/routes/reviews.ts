@@ -42,13 +42,13 @@ export async function reviewRoutes(app: FastifyInstance) {
             const { rating, review_text, visit_date, place_name } = parsed.data;
 
             try {
-                const review = await reviews.createReview(userId, placeId, {
+                const { review, points_awarded, balance } = await reviews.createReview(userId, placeId, {
                     rating,
                     reviewText: review_text,
                     visitDate: visit_date,
                     placeName: place_name,
                 });
-                return reply.status(201).send(envelope(review));
+                return reply.status(201).send(envelope({ review, points_awarded, balance }));
             } catch (err: any) {
                 return reply.status(500).send(
                     errorResponse(500, err?.message ?? 'Failed to save review', 'ServerError')

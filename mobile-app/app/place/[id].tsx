@@ -268,12 +268,18 @@ export default function PlaceDetailScreen() {
         }
     }, [place]);
 
-    const handleReviewComplete = useCallback((pointsAwarded: number) => {
+    const handleReviewComplete = useCallback((pointsAwarded: number, newBalance: number) => {
         setReviewModalVisible(false);
-        Alert.alert('Review saved!', `+${pointsAwarded} points earned`);
-        queryClient.invalidateQueries({ queryKey: ['loyalty', 'balance'] });
+        if (pointsAwarded > 0) {
+            Alert.alert('Review saved!', `+${pointsAwarded} points earned`);
+            // Instantly update the home badge without waiting for a network round-trip
+            queryClient.setQueryData(['loyalty', 'balance', user?.id], newBalance);
+        } else {
+            Alert.alert('Review saved!', 'Thanks for your feedback!');
+        }
+        queryClient.invalidateQueries({ queryKey: ['loyalty'] });
         if (id) checkIfLoved(id);
-    }, [id, queryClient]);
+    }, [id, queryClient, user?.id]);
 
     const handleReviewSkip = useCallback(() => {
         setReviewModalVisible(false);

@@ -1185,7 +1185,7 @@ export default function ProfileScreen() {
         setLovedPlaces(
           raw.map((p: any) => ({
             id: p.id ?? p.place_id ?? String(Math.random()),
-            name: p.name ?? 'Unknown Place',
+            name: p.place_name ?? p.name ?? 'Unknown Place',
             neighborhood: p.neighborhood ?? p.area ?? undefined,
             priceRange: p.price_range ?? p.priceRange ?? undefined,
             category: p.category ?? undefined,
