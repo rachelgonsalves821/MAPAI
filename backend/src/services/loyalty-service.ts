@@ -103,7 +103,7 @@ export class LoyaltyService {
         const supabase = getSupabase()!;
         const { data } = await (supabase.from('users') as any)
             .select('points_balance')
-            .eq('user_id', userId)
+            .eq('clerk_user_id', userId)
             .maybeSingle();
         return data?.points_balance ?? 0;
     }
@@ -192,7 +192,7 @@ export class LoyaltyService {
         const currentBalance = await this.getBalance(userId);
         await (supabase.from('users') as any)
             .update({ points_balance: currentBalance + points })
-            .eq('user_id', userId);
+            .eq('clerk_user_id', userId);
 
         const newBalance = currentBalance + points;
         return { balance: newBalance, transaction: tx };
