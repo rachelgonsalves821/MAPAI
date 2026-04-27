@@ -11,7 +11,7 @@ import {
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, BorderRadius, Shadows } from '@/constants/theme';
-import { BACKEND_URL } from '@/constants/api';
+import apiClient from '@/services/api/client';
 const NAVY = '#0558E8';
 
 // ─── Types ──────────────────────────────────────────
@@ -132,16 +132,13 @@ export default function RewardsScreen() {
   const fetchAll = useCallback(async () => {
     try {
       const [balRes, rewRes, actRes] = await Promise.all([
-        fetch(`${BACKEND_URL}/v1/loyalty/balance`),
-        fetch(`${BACKEND_URL}/v1/loyalty/rewards`),
-        fetch(`${BACKEND_URL}/v1/loyalty/history?limit=10`),
+        apiClient.get('/v1/loyalty/balance'),
+        apiClient.get('/v1/loyalty/rewards'),
+        apiClient.get('/v1/loyalty/history', { params: { limit: 10 } }),
       ]);
-      const bal = await balRes.json();
-      const rew = await rewRes.json();
-      const act = await actRes.json();
-      setBalanceData(bal.data);
-      setRewards(rew.data?.rewards || []);
-      setActivity(act.data?.transactions || []);
+      setBalanceData(balRes.data?.data ?? null);
+      setRewards(rewRes.data?.data?.rewards || []);
+      setActivity(actRes.data?.data?.transactions || []);
     } catch { /* keep defaults */ }
     finally { setLoading(false); setRefreshing(false); }
   }, []);
@@ -155,10 +152,8 @@ export default function RewardsScreen() {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Redeem', onPress: async () => {
         try {
-          const res = await fetch(`${BACKEND_URL}/v1/loyalty/rewards/${reward.id}/redeem`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
-          });
-          const d = (await res.json()).data;
+          const res = await apiClient.post(`/v1/loyalty/rewards/${reward.id}/redeem`, {});
+          const d = res.data?.data;
           setRedemptionCode(d?.redemption_code || '--------');
           setRedeemedReward(reward);
           setModalVisible(true);
