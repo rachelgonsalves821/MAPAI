@@ -26,8 +26,7 @@ export class ReviewService {
         }
     ): Promise<any> {
         if (!hasDatabase()) {
-            console.warn('[ReviewService] No database — returning null for createReview (configure Supabase to persist reviews)');
-            return null;
+            return { review: null, points_awarded: 0, balance: 0 };
         }
 
         const isNew = !(await this.getReview(userId, placeId));

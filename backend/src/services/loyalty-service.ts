@@ -103,7 +103,7 @@ export class LoyaltyService {
         const supabase = getSupabase()!;
         const { data } = await (supabase.from('users') as any)
             .select('points_balance')
-            .eq('id', userId)
+            .eq('user_id', userId)
             .maybeSingle();
         return data?.points_balance ?? 0;
     }
@@ -188,12 +188,13 @@ export class LoyaltyService {
             .select()
             .single();
 
-        // Update denormalized balance with increment
+        // Read current balance, add points, write back
+        const currentBalance = await this.getBalance(userId);
         await (supabase.from('users') as any)
-            .update({ points_balance: (await this.getBalance(userId)) + points })
-            .eq('id', userId);
+            .update({ points_balance: currentBalance + points })
+            .eq('user_id', userId);
 
-        const newBalance = await this.getBalance(userId);
+        const newBalance = currentBalance + points;
         return { balance: newBalance, transaction: tx };
     }
 
