@@ -44,11 +44,11 @@ export async function getOrCreateUser(authUser: {
 
   const supabase = getSupabase()!;
 
-  // Check if user already exists
+  // Check if user already exists (by user_id — the auth sub, renamed from clerk_user_id)
   const { data: existing } = await (supabase
     .from('users') as any)
     .select('*')
-    .eq('id', authUser.id)
+    .eq('user_id', authUser.id)
     .maybeSingle();
 
   if (existing) return existing as MapaiUser;
@@ -64,7 +64,7 @@ export async function getOrCreateUser(authUser: {
   const { data: newUser, error } = await (supabase
     .from('users') as any)
     .insert({
-      id: authUser.id,
+      user_id: authUser.id,
       username,
       display_name: displayName,
       email: authUser.email,

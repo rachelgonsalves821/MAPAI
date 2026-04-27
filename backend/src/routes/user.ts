@@ -89,9 +89,16 @@ export async function userRoutes(app: FastifyInstance) {
             try {
                 if (hasDatabase()) {
                     const supabase = getSupabase()!;
+                    // upsert so this is safe even if the create-identity step
+                    // failed to write the row (display_name/username left blank
+                    // — the onboarding step already wrote them; this is a guard)
                     await (supabase.from('user_profiles') as any)
-                        .update({ is_onboarded: true })
-                        .eq('user_id', userId);
+                        .upsert({
+                            user_id: userId,
+                            is_onboarded: true,
+                            display_name: (request.body as any)?.display_name || '',
+                            username: (request.body as any)?.username || '',
+                        }, { onConflict: 'user_id' });
                 }
 
                 return envelope({ success: true, onboardingCompleted: true });

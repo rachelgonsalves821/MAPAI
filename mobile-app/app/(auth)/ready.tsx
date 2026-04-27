@@ -41,25 +41,21 @@ export default function ReadyScreen() {
   const resolvedName = displayName || 'Explorer';
 
   async function handleOpenMap() {
-    // Mark onboarding complete on the backend (updates user_profiles.is_onboarded)
-    try {
-      const token = await getToken();
-      await apiClient.post(
-        '/v1/user/complete-onboarding',
-        {},
-        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
-      );
-    } catch (err) {
-      console.error('[Ready] Backend onboarding completion failed:', err);
-      // Continue anyway — local state update below handles this session
-    }
+    // Persist flag locally FIRST — this is the source of truth if the DB is
+    // slow or the backend call fails; AuthContext reads this on every app load.
+    await AsyncStorage.setItem('mapai_onboarding_complete', 'true').catch(() => {});
 
-    // Update local state + Zustand store
+    // Update in-memory state immediately so the route guard doesn't bounce
     complete();
     updateUser({ onboardingComplete: true });
 
-    // Navigate — replace() clears the auth stack entirely
+    // Navigate now — don't block the user on the network call
     router.replace('/home');
+
+    // Best-effort backend sync (fire-and-forget)
+    apiClient.post('/v1/user/complete-onboarding', {}).catch((err) => {
+      console.error('[Ready] Backend onboarding completion failed (non-blocking):', err);
+    });
   }
 
   return (

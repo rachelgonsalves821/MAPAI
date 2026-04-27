@@ -37,8 +37,13 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const GUEST_STORAGE_KEY = 'mapai_guest_user';
+const ONBOARDING_COMPLETE_KEY = 'mapai_onboarding_complete';
 
 async function loadUserProfile(userId: string, sbUser: SupabaseUser): Promise<User> {
+  // Check AsyncStorage first — written by ready.tsx on successful onboarding
+  // and survives app restarts even if the DB row isn't yet visible
+  const localOnboarded = await AsyncStorage.getItem(ONBOARDING_COMPLETE_KEY).catch(() => null);
+
   try {
     const { data } = await supabase
       .from('user_profiles')
@@ -56,7 +61,8 @@ async function loadUserProfile(userId: string, sbUser: SupabaseUser): Promise<Us
         undefined,
       username: data?.username || undefined,
       avatarUrl: data?.avatar_url || sbUser.user_metadata?.avatar_url || undefined,
-      onboardingComplete: data?.is_onboarded === true,
+      // Trust the local flag if DB row is missing — prevents bounce after onboarding
+      onboardingComplete: data?.is_onboarded === true || localOnboarded === 'true',
       isGuest: false,
     };
   } catch {
@@ -65,7 +71,7 @@ async function loadUserProfile(userId: string, sbUser: SupabaseUser): Promise<Us
       email: sbUser.email,
       displayName:
         sbUser.user_metadata?.full_name || sbUser.user_metadata?.name || undefined,
-      onboardingComplete: false,
+      onboardingComplete: localOnboarded === 'true',
       isGuest: false,
     };
   }
@@ -101,7 +107,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (session?.user) {
         setSupabaseUser(session.user);
         const profile = await loadUserProfile(session.user.id, session.user);
-        setUser(profile);
+        // Never downgrade onboardingComplete mid-session: a TOKEN_REFRESHED event
+        // can fire after the user has just finished onboarding but before the DB
+        // row is visible, which would bounce them back to create-identity.
+        setUser((prev) => ({
+          ...profile,
+          onboardingComplete: prev?.onboardingComplete === true
+            ? true
+            : profile.onboardingComplete,
+        }));
         setIsLoading(false);
       } else if (event === 'SIGNED_OUT') {
         setSupabaseUser(null);

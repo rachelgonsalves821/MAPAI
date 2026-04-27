@@ -16,6 +16,7 @@ import {
   Platform,
   Keyboard,
   ScrollView,
+  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -40,6 +41,7 @@ export default function CreateIdentityScreen() {
   );
   const [localUsername, setLocalUsername] = useState('');
   const [usernameStatus, setUsernameStatus] = useState<UsernameStatus>('idle');
+  const [submitting, setSubmitting] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isFormValid =
@@ -102,33 +104,32 @@ export default function CreateIdentityScreen() {
   const { getToken } = useAuth();
 
   async function handleContinue() {
+    if (submitting) return;
     Keyboard.dismiss();
     const trimmedName = localName.trim();
-    setDisplayName(trimmedName);
-    setUsername(localUsername);
+    setSubmitting(true);
 
-    // Create user profile via backend API (handles Supabase insert with proper auth)
     try {
-      const token = await getToken();
-      await apiClient.post(
-        '/v1/user/onboarding',
-        {
-          display_name: trimmedName,
-          username: localUsername,
-          preferences: {
-            cuisine_preferences: [],
-            ambiance_preferences: [],
-            dietary_restrictions: [],
-            price_range: { min: 1, max: 3 },
-          },
+      await apiClient.post('/v1/user/onboarding', {
+        display_name: trimmedName,
+        username: localUsername,
+        preferences: {
+          cuisine_preferences: [],
+          ambiance_preferences: [],
+          dietary_restrictions: [],
+          price_range: { min: 1, max: 3 },
         },
-        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
-      );
-    } catch (e) {
-      console.warn('Backend profile creation failed (non-blocking):', e);
+      });
+      // Only save to store and navigate after the backend confirms success
+      setDisplayName(trimmedName);
+      setUsername(localUsername);
+      router.push('/(auth)/enable-location');
+    } catch (e: any) {
+      const msg = e?.response?.data?.error?.title ?? 'Could not save your profile. Please try again.';
+      Alert.alert('Setup failed', msg);
+    } finally {
+      setSubmitting(false);
     }
-
-    router.push('/(auth)/enable-location');
   }
 
   function renderUsernameStatus() {
@@ -242,19 +243,23 @@ export default function CreateIdentityScreen() {
 
             {/* Continue button */}
             <TouchableOpacity
-              style={[styles.continueButton, !isFormValid && styles.continueButtonDisabled]}
+              style={[styles.continueButton, (!isFormValid || submitting) && styles.continueButtonDisabled]}
               onPress={handleContinue}
-              disabled={!isFormValid}
+              disabled={!isFormValid || submitting}
               activeOpacity={0.85}
             >
-              <Text
-                style={[
-                  styles.continueButtonText,
-                  !isFormValid && styles.continueButtonTextDisabled,
-                ]}
-              >
-                Continue →
-              </Text>
+              {submitting ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text
+                  style={[
+                    styles.continueButtonText,
+                    !isFormValid && styles.continueButtonTextDisabled,
+                  ]}
+                >
+                  Continue →
+                </Text>
+              )}
             </TouchableOpacity>
           </ScrollView>
         </SafeAreaView>
