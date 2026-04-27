@@ -48,7 +48,7 @@ export async function reviewRoutes(app: FastifyInstance) {
                     visitDate: visit_date,
                     placeName: place_name,
                 });
-                return reply.status(201).send(envelope({ review, points_awarded, balance }));
+                return reply.status(201).send(envelope({ ...review, points_awarded, balance }));
             } catch (err: any) {
                 return reply.status(500).send(
                     errorResponse(500, err?.message ?? 'Failed to save review', 'ServerError')
