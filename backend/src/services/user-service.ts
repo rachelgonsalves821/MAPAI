@@ -127,10 +127,10 @@ export class UserService {
         }
 
         const supabase = getSupabase()!;
-        const { data, error } = await supabase
-            .from('users')
+        const { data, error } = await (supabase
+            .from('users') as any)
             .select('*')
-            .eq('id', userId)
+            .eq('user_id', userId)
             .single();
 
         if (error) return null;

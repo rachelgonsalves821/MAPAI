@@ -34,14 +34,14 @@ export class ReviewService {
         const supabase = getSupabase()!;
         const { data, error } = await (supabase.from('place_reviews') as any)
             .upsert({
-                clerk_user_id: userId,
+                user_id: userId,
                 place_id: placeId,
                 place_name: opts.placeName ?? null,
                 rating: opts.rating ?? null,
                 review_text: opts.reviewText ?? null,
                 visit_date: opts.visitDate ?? null,
                 updated_at: new Date().toISOString(),
-            }, { onConflict: 'clerk_user_id,place_id' })
+            }, { onConflict: 'user_id,place_id' })
             .select()
             .single();
 
@@ -82,7 +82,7 @@ export class ReviewService {
         const supabase = getSupabase()!;
         const { data } = await (supabase.from('place_reviews') as any)
             .select('*')
-            .eq('clerk_user_id', userId)
+            .eq('user_id', userId)
             .eq('place_id', placeId)
             .maybeSingle();
         return data ?? null;
@@ -103,14 +103,14 @@ export class ReviewService {
 
         let query = (supabase.from('place_reviews') as any)
             .select(`
-                id, clerk_user_id, place_id, place_name, rating, review_text, visit_date,
+                id, user_id, place_id, place_name, rating, review_text, visit_date,
                 created_at, updated_at
             `)
             .eq('place_id', placeId)
             .order('created_at', { ascending: false });
 
         if (blockedIds.length > 0) {
-            query = query.not('clerk_user_id', 'in', `(${blockedIds.map((id: string) => `"${id.replace(/"/g, '')}"`).join(',')})`);
+            query = query.not('user_id', 'in', `(${blockedIds.map((id: string) => `"${id.replace(/"/g, '')}"`).join(',')})`);
         }
 
         const { data } = await query;
@@ -147,11 +147,11 @@ export class ReviewService {
 
         const { data } = await (supabase.from('place_reviews') as any)
             .select(`
-                id, clerk_user_id, place_id, place_name, rating, review_text, visit_date,
+                id, user_id, place_id, place_name, rating, review_text, visit_date,
                 created_at
             `)
             .eq('place_id', placeId)
-            .in('clerk_user_id', validFriendIds)
+            .in('user_id', validFriendIds)
             .order('created_at', { ascending: false });
 
         return data || [];
@@ -168,7 +168,7 @@ export class ReviewService {
         const supabase = getSupabase()!;
         const { data } = await (supabase.from('place_reviews') as any)
             .select('*')
-            .eq('clerk_user_id', userId)
+            .eq('user_id', userId)
             .order('created_at', { ascending: false });
 
         return data || [];
@@ -184,7 +184,7 @@ export class ReviewService {
         const supabase = getSupabase()!;
         await (supabase.from('place_reviews') as any)
             .delete()
-            .eq('clerk_user_id', userId)
+            .eq('user_id', userId)
             .eq('place_id', placeId);
     }
 }

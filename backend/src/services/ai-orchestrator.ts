@@ -580,7 +580,7 @@ Your response:
             const { data: preferences } = await (supabase as any)
                 .from('user_preferences')
                 .select('dimension, value, confidence')
-                .eq('clerk_user_id', userId)
+                .eq('user_id', userId)
                 .gte('confidence', 0.3)
                 .order('confidence', { ascending: false })
                 .limit(15);
@@ -698,7 +698,7 @@ Return ONLY the JSON array:`;
                 const { data: existing } = await (supabase as any)
                     .from('user_preferences')
                     .select('confidence')
-                    .eq('clerk_user_id', userId)
+                    .eq('user_id', userId)
                     .eq('dimension', pref.dimension)
                     .maybeSingle();
 
@@ -708,7 +708,7 @@ Return ONLY the JSON array:`;
                     .from('user_preferences')
                     .upsert(
                         {
-                            clerk_user_id: userId,
+                            user_id: userId,
                             dimension: pref.dimension,
                             value: pref.value,
                             confidence: pref.confidence,
@@ -716,7 +716,7 @@ Return ONLY the JSON array:`;
                             last_updated: new Date().toISOString(),
                             decay_weight: 1.0,
                         },
-                        { onConflict: 'clerk_user_id,dimension' }
+                        { onConflict: 'user_id,dimension' }
                     );
             }
         } catch (err) {

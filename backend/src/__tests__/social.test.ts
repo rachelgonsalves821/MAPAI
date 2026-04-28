@@ -1126,7 +1126,7 @@ describe('Review routes', () => {
 
         const savedReview = {
             id: 'rev-1',
-            clerk_user_id: DEV_USER_ID,
+            user_id: DEV_USER_ID,
             place_id: REVIEW_PLACE_ID,
             rating: 4,
             review_text: 'Really good espresso.',
@@ -1212,7 +1212,7 @@ describe('Review routes', () => {
 
         const review = {
             id: 'rev-1',
-            clerk_user_id: DEV_USER_ID,
+            user_id: DEV_USER_ID,
             place_id: REVIEW_PLACE_ID,
             rating: 3,
             review_text: 'Decent place.',
@@ -1245,7 +1245,7 @@ describe('Review routes', () => {
 
         const review = {
             id: 'rev-2',
-            clerk_user_id: DEV_USER_ID,
+            user_id: DEV_USER_ID,
             place_id: REVIEW_PLACE_ID,
             rating: 5,
             review_text: 'Loved it!',
@@ -1264,7 +1264,7 @@ describe('Review routes', () => {
         expect(response.statusCode).toBe(200);
         const body = response.json();
         expect(body.data.count).toBe(1);
-        expect(body.data.reviews[0].clerk_user_id).toBe(DEV_USER_ID);
+        expect(body.data.reviews[0].user_id).toBe(DEV_USER_ID);
     });
 
     it('DELETE /reviews/places/:placeId — deletes own review (DB path)', async () => {
@@ -1272,7 +1272,7 @@ describe('Review routes', () => {
 
         const existingReview = {
             id: 'rev-3',
-            clerk_user_id: DEV_USER_ID,
+            user_id: DEV_USER_ID,
             place_id: REVIEW_PLACE_ID,
             rating: 2,
         };
