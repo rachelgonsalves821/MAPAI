@@ -13,6 +13,7 @@ import { useRouter, useSegments } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Session, User as SupabaseUser } from '@supabase/supabase-js';
 import { supabase } from '@/services/supabase';
+import { BACKEND_URL } from '@/constants/api';
 
 interface User {
   id: string;
@@ -106,6 +107,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSession(session);
       if (session?.user) {
         setSupabaseUser(session.user);
+        // Ensure the public.users row exists — creates it if missing so points
+        // balance and profile data are always tracked correctly.
+        fetch(`${BACKEND_URL}/v1/user/ensure`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ user_metadata: session.user.user_metadata || {} }),
+        }).catch(() => {});
         const profile = await loadUserProfile(session.user.id, session.user);
         // Never downgrade onboardingComplete mid-session: a TOKEN_REFRESHED event
         // can fire after the user has just finished onboarding but before the DB

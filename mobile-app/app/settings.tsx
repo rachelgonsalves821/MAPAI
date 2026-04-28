@@ -244,22 +244,26 @@ export default function SettingsScreen() {
   };
 
   const handleSignOut = () => {
-    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Sign Out',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            useAuthStore.getState().logout();
-            useOnboardingStore.getState().reset();
-            await signOut();
-          } catch (err) {
-            console.error('Sign out error:', err);
-          }
-        },
-      },
-    ]);
+    const doSignOut = async () => {
+      try {
+        useAuthStore.getState().logout();
+        useOnboardingStore.getState().reset();
+        await signOut();
+      } catch (err) {
+        console.error('Sign out error:', err);
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined' && window.confirm('Sign Out\n\nAre you sure you want to sign out?')) {
+        doSignOut();
+      }
+    } else {
+      Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Sign Out', style: 'destructive', onPress: doSignOut },
+      ]);
+    }
   };
 
   const handleDeleteAccount = () => {

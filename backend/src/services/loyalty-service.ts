@@ -188,13 +188,15 @@ export class LoyaltyService {
             .select()
             .single();
 
-        // Read current balance, add points, write back
+        // Upsert balance — creates the users row if missing, updates it if present
         const currentBalance = await this.getBalance(userId);
-        await (supabase.from('users') as any)
-            .update({ points_balance: currentBalance + points })
-            .eq('user_id', userId);
-
         const newBalance = currentBalance + points;
+        await (supabase.from('users') as any)
+            .upsert(
+                { user_id: userId, points_balance: newBalance },
+                { onConflict: 'user_id' }
+            );
+
         return { balance: newBalance, transaction: tx };
     }
 
