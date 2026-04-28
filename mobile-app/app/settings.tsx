@@ -243,6 +243,25 @@ export default function SettingsScreen() {
     );
   };
 
+  const handleSignOut = () => {
+    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Sign Out',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            useAuthStore.getState().logout();
+            useOnboardingStore.getState().reset();
+            await signOut();
+          } catch (err) {
+            console.error('Sign out error:', err);
+          }
+        },
+      },
+    ]);
+  };
+
   const handleDeleteAccount = () => {
     Alert.alert(
       'Delete Account',
@@ -473,6 +492,16 @@ export default function SettingsScreen() {
 
         {/* ── Account ─────────────────────────────────────────────────────── */}
         <Section title="Account">
+          <TouchableOpacity style={styles.actionRow} onPress={handleSignOut} activeOpacity={0.7}>
+            <View style={[styles.actionIcon, { backgroundColor: Colors.error + '18' }]}>
+              <Ionicons name="log-out-outline" size={18} color={Colors.error} />
+            </View>
+            <Text style={[styles.actionLabel, { color: Colors.error }]}>Sign Out</Text>
+            <Ionicons name="chevron-forward" size={16} color={Colors.textTertiary} />
+          </TouchableOpacity>
+
+          <Divider />
+
           <TouchableOpacity style={styles.actionRow} onPress={handleExportData} activeOpacity={0.7}>
             <View style={[styles.actionIcon, { backgroundColor: Colors.brandBlue + '18' }]}>
               <Ionicons name="download-outline" size={18} color={Colors.brandBlue} />

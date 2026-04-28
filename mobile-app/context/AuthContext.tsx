@@ -173,7 +173,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       await supabase.auth.signOut();
     } catch {}
-    await AsyncStorage.removeItem(GUEST_STORAGE_KEY);
+    await Promise.all([
+      AsyncStorage.removeItem(GUEST_STORAGE_KEY),
+      AsyncStorage.removeItem(ONBOARDING_COMPLETE_KEY),
+    ]);
     setUser(null);
     setSupabaseUser(null);
     setSession(null);
